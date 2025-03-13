@@ -1,3 +1,6 @@
+
+![logo](https://github.com/user-attachments/assets/4a8460f8-76cc-478e-8580-9d6aab45b5e6)
+
 # InvoicePages
 
 A full-stack invoice management application with integrated payment portals (Stripe, PayPal), invoice storage, and payment status tracking.
