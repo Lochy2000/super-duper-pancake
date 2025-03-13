@@ -1,5 +1,5 @@
 
-![logo](https://github.com/user-attachments/assets/4a8460f8-76cc-478e-8580-9d6aab45b5e6)
+![logoSmall](https://github.com/user-attachments/assets/a25c4ee9-3f28-4d27-aa9f-09789b72f0d4)
 
 # InvoicePages
 
