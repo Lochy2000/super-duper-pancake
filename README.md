@@ -1,4 +1,3 @@
-
 ![logoSmall](https://github.com/user-attachments/assets/a25c4ee9-3f28-4d27-aa9f-09789b72f0d4)
 
 # InvoicePages
