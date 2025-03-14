@@ -1,141 +1,47 @@
-const nodemailer = require('nodemailer');
+const SibApiV3Sdk = require('sib-api-v3-sdk');
 const config = require('../config/env');
-const brevoService = require('./brevo.service');
 
-// Flag to control email sending (useful for testing)
-const SEND_EMAILS = true;
-
-// Create nodemailer transporter
-const getTransporter = () => {
-  // Check if SendGrid API key is available
-  if (config.email.sendgridApiKey) {
-    return nodemailer.createTransport({
-      service: 'SendGrid',
-      auth: {
-        user: 'apikey',
-        pass: config.email.sendgridApiKey
-      }
-    });
-  }
-  
-  // Check if using Brevo SMTP
-  if (config.email.host && config.email.host.includes('brevo')) {
-    console.log('Configuring email transport for Brevo SMTP');
-    return nodemailer.createTransport({
-      host: config.email.host,
-      port: config.email.port,
-      secure: false, // Brevo uses STARTTLS on port 587
-      auth: {
-        user: config.email.user,
-        pass: config.email.password
-      }
-    });
-  }
-  
-  // Check if using Outlook/Hotmail
-  const isOutlook = config.email.host && (
-    config.email.host.includes('outlook') || 
-    config.email.host.includes('hotmail') || 
-    config.email.host.includes('office365')
-  );
-
-  // Configure specifically for Outlook/Hotmail
-  if (isOutlook) {
-    console.log('Configuring email transport for Outlook/Hotmail');
-    return nodemailer.createTransport({
-      host: config.email.host,
-      port: config.email.port,
-      secure: false, // Outlook uses STARTTLS on port 587
-      auth: {
-        user: config.email.user,
-        pass: config.email.password
-      },
-      tls: {
-        ciphers: 'SSLv3', // Required for Outlook
-        rejectUnauthorized: false // Useful in development environments
-      }
-    });
-  }
-  
-  // Fallback to standard SMTP
-  return nodemailer.createTransport({
-    host: config.email.host,
-    port: config.email.port,
-    secure: config.email.port === 465, // true for 465, false for other ports
-    auth: {
-      user: config.email.user,
-      pass: config.email.password
-    }
-  });
+// Initialize Brevo client
+const initClient = () => {
+  const defaultClient = SibApiV3Sdk.ApiClient.instance;
+  const apiKey = defaultClient.authentications['api-key'];
+  apiKey.apiKey = config.email.brevoApiKey;
+  return new SibApiV3Sdk.TransactionalEmailsApi();
 };
 
 /**
- * Safely send an email, with error handling
- * @param {Object} mailOptions The nodemailer mail options
+ * Send an email using the Brevo API
+ * @param {Object} options Email options
  * @returns {Promise<boolean>} Success status
  */
-const safelySendEmail = async (mailOptions) => {
-  // Skip sending if disabled
-  if (!SEND_EMAILS) {
-    console.log('Email sending is disabled. Would have sent to:', mailOptions.to);
-    console.log('Email subject:', mailOptions.subject);
-    return true;
-  }
+const sendEmail = async (options) => {
+  const { to, subject, html, from = config.email.from } = options;
   
   try {
-    // Try sending with Brevo API first if configured
-    if (config.email.brevoApiKey) {
-      console.log('Using Brevo API to send email...');
-      return await brevoService.sendEmail({
-        to: mailOptions.to,
-        subject: mailOptions.subject,
-        html: mailOptions.html,
-        from: mailOptions.from
-      });
-    }
-    
-    // Fallback to SMTP if Brevo API is not configured
-    // Skip if email config is not set
-    if (!config.email.host && !config.email.sendgridApiKey) {
-      console.log('Email configuration not set. Skipping email notification.');
+    if (!config.email.brevoApiKey) {
+      console.log('Brevo API key not set. Skipping email notification.');
       return false;
     }
     
-    const transporter = getTransporter();
+    const apiInstance = initClient();
+    const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
     
-    // Verify transporter configuration before sending
-    try {
-      // Only verify if not using SendGrid
-      if (!config.email.sendgridApiKey) {
-        console.log('Verifying email connection...');
-        await transporter.verify();
-        console.log('Email server connection successful!');
-      }
-    } catch (verifyError) {
-      console.error('Email server connection failed:', verifyError);
-      console.log('Check your email configuration in .env file.');
-      return false;
-    }
+    sendSmtpEmail.subject = subject;
+    sendSmtpEmail.htmlContent = html;
+    sendSmtpEmail.sender = { email: from, name: "Invoice System" };
+    sendSmtpEmail.to = [{ email: to }];
     
-    // Send the email
-    const result = await transporter.sendMail(mailOptions);
-    console.log(`Email sent to ${mailOptions.to}`);
+    console.log(`Attempting to send email to ${to}...`);
+    const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
+    
+    console.log(`Email sent to ${to} successfully!`);
     console.log(`Message ID: ${result.messageId}`);
     return true;
   } catch (error) {
-    console.error('Error sending email:', error);
-    
-    // Provide more helpful error messages
-    if (error.code === 'EAUTH') {
-      console.error('Authentication error: Check your username and password.');
-      console.error('If using Hotmail/Outlook with 2FA, ensure you are using an app password.');
-    } else if (error.code === 'ESOCKET') {
-      console.error('Connection error: Could not connect to email server.');
-      console.error('Check your EMAIL_HOST and EMAIL_PORT settings.');
-    } else if (error.code === 'EENVELOPE') {
-      console.error('Addressing error: Check the email addresses (from/to).');
+    console.error('Error sending email with Brevo:', error);
+    if (error.response) {
+      console.error('API error:', error.response.body);
     }
-    
     return false;
   }
 };
@@ -147,7 +53,6 @@ const safelySendEmail = async (mailOptions) => {
  */
 exports.sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
   try {
-    
     // Format due date
     const dueDate = new Date(invoice.dueDate).toLocaleDateString();
     
@@ -166,9 +71,7 @@ exports.sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
     // Create invoice payment link
     const paymentUrl = `${config.frontendUrl}/invoices/${invoice.invoiceNumber}`;
     
-    // Email content
-    const mailOptions = {
-      from: config.email.from,
+    return await sendEmail({
       to: toEmail || invoice.clientEmail,
       subject: `Invoice #${invoice.invoiceNumber} from Your Company Name`,
       html: `
@@ -232,10 +135,7 @@ exports.sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
           </div>
         </div>
       `
-    };
-    
-    // Send email using the helper function
-    return await safelySendEmail(mailOptions);
+    });
   } catch (error) {
     console.error('Error preparing invoice email:', error);
     return false;
@@ -248,7 +148,6 @@ exports.sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
  */
 exports.sendPaymentConfirmationEmail = async (invoice) => {
   try {
-    
     // Create invoice view link
     const invoiceUrl = `${config.frontendUrl}/invoices/${invoice.invoiceNumber}`;
     
@@ -256,9 +155,7 @@ exports.sendPaymentConfirmationEmail = async (invoice) => {
     const paymentMethod = invoice.paymentMethod === 'stripe' ? 'Credit Card' : 
                          invoice.paymentMethod === 'paypal' ? 'PayPal' : 'Other';
     
-    // Email content
-    const mailOptions = {
-      from: config.email.from,
+    return await sendEmail({
       to: invoice.clientEmail,
       subject: `Payment Confirmation for Invoice #${invoice.invoiceNumber}`,
       html: `
@@ -296,10 +193,7 @@ exports.sendPaymentConfirmationEmail = async (invoice) => {
           </div>
         </div>
       `
-    };
-    
-    // Send email
-    return await safelySendEmail(mailOptions);
+    });
   } catch (error) {
     console.error('Error preparing payment confirmation email:', error);
     return false;
@@ -312,7 +206,6 @@ exports.sendPaymentConfirmationEmail = async (invoice) => {
  */
 exports.sendInvoiceReminderEmail = async (invoice) => {
   try {
-    
     // Format due date
     const dueDate = new Date(invoice.dueDate).toLocaleDateString();
     
@@ -322,9 +215,7 @@ exports.sendInvoiceReminderEmail = async (invoice) => {
     // Determine if invoice is overdue
     const isOverdue = new Date(invoice.dueDate) < new Date();
     
-    // Email content
-    const mailOptions = {
-      from: config.email.from,
+    return await sendEmail({
       to: invoice.clientEmail,
       subject: isOverdue 
         ? `OVERDUE: Invoice #${invoice.invoiceNumber} Payment Required`
@@ -368,12 +259,35 @@ exports.sendInvoiceReminderEmail = async (invoice) => {
           </div>
         </div>
       `
-    };
-    
-    // Send email
-    return await safelySendEmail(mailOptions);
+    });
   } catch (error) {
     console.error('Error preparing reminder email:', error);
     return false;
   }
+};
+
+// Export a test function
+exports.sendTestEmail = async (to) => {
+  return await sendEmail({
+    to,
+    subject: 'Invoice App Email Test',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background-color: #f8f9fa; padding: 20px; text-align: center;">
+          <h1 style="color: #333;">Email Test Successful</h1>
+        </div>
+        
+        <div style="padding: 20px;">
+          <p>This email confirms that your Invoice App email configuration is working correctly.</p>
+          <p>You can now send invoice notifications and payment confirmations.</p>
+          
+          <div style="margin: 20px 0; background-color: #f8f9fa; padding: 15px; border-radius: 5px;">
+            <p><strong>Test sent at:</strong> ${new Date().toLocaleString()}</p>
+          </div>
+          
+          <p>Best regards,<br>Your Invoice App</p>
+        </div>
+      </div>
+    `
+  });
 };

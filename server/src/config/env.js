@@ -23,7 +23,9 @@ module.exports = {
     user: process.env.EMAIL_USER,
     password: process.env.EMAIL_PASSWORD,
     from: process.env.EMAIL_FROM,
-    sendgridApiKey: process.env.SENDGRID_API_KEY
+    replyTo: process.env.EMAIL_REPLY_TO,
+    sendgridApiKey: process.env.SENDGRID_API_KEY,
+    brevoApiKey: process.env.BREVO_API_KEY
   },
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000'
 };

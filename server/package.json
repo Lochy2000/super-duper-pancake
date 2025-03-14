@@ -9,6 +9,17 @@
     "seed": "node src/utils/seed.js",
     "generate-secrets": "node src/scripts/generateSecrets.js",
     "reset-admin": "node src/scripts/reset-admin.js",
+    "test-email": "node src/scripts/test-email.js",
+    "test-invoice": "node src/scripts/send-test-invoice.js",
+    "test-brevo": "node src/scripts/test-brevo-email.js",
+    "test-brevo-smtp": "node src/scripts/test-brevo-smtp.js",
+    "test-brevo-variants": "node src/scripts/test-brevo-variants.js",
+    "test-brevo-api": "node src/scripts/test-brevo-api.js",
+    "test-brevo-api-custom": "node src/scripts/test-brevo-api-custom.js",
+    "test-brevo-api-invoice": "node src/scripts/test-brevo-api-invoice.js",
+    "test-invoice-brevo": "node src/scripts/test-invoice-brevo.js",
+    "check-emails": "node src/scripts/check-brevo-events.js",
+    "check-sender": "node src/scripts/check-brevo-sender.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -20,19 +31,20 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@paypal/checkout-server-sdk": "^1.0.3",
     "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
     "express-validator": "^7.0.1",
+    "helmet": "^7.0.0",
     "jsonwebtoken": "^9.0.0",
     "mongoose": "^7.2.2",
-    "stripe": "^12.9.0",
-    "@paypal/checkout-server-sdk": "^1.0.3",
-    "nodemailer": "^6.9.3",
-    "helmet": "^7.0.0",
     "morgan": "^1.10.0",
-    "compression": "^1.7.4"
+    "nodemailer": "^6.9.3",
+    "sib-api-v3-sdk": "^8.5.0",
+    "stripe": "^12.9.0"
   },
   "devDependencies": {
     "nodemon": "^2.0.22"

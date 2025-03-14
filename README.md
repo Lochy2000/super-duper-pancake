@@ -1,135 +1,116 @@
-# InvoicePages
+# InvoicePages - Full Stack Invoicing Application
 
-A full-stack invoice management application with integrated payment portals (Stripe, PayPal), invoice storage, and payment status tracking.
-
-## Features
-
-- Create, view, and manage invoices
-- Send invoices to clients via email
-- Accept payments via Stripe and PayPal
-- Track payment status in real-time
-- Admin dashboard for invoice management
-- Client-facing invoice payment portal
-- Email notifications for invoice and payment events
-
-## Tech Stack
-
-### Frontend
-- Next.js (React framework)
-- TypeScript
-- Tailwind CSS for styling
-- Axios for API requests
-- React Hook Form for form handling
-- React Toastify for notifications
-- Payment integrations: Stripe and PayPal
-
-### Backend
-- Node.js with Express
-- MongoDB for database (via Mongoose)
-- JWT for authentication
-- Email notifications via Nodemailer (with SendGrid option)
-- Payment integrations: Stripe and PayPal
+A complete invoicing solution with Stripe and PayPal payment integration.
 
 ## Project Structure
 
-The project is divided into two main directories:
+This is a monorepo containing both the client (frontend) and server (backend) applications:
 
 - `client/`: Next.js frontend application
-- `server/`: Node.js Express backend API
+- `server/`: Node.js/Express backend API
 
-## Getting Started
+## Development Setup
 
-### Prerequisites
-
-- Node.js (v16 or later)
-- MongoDB database (local or Atlas)
-- Stripe and PayPal developer accounts
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/InvoicePages.git
-cd InvoicePages
-```
-
+1. Clone the repository
 2. Install dependencies for both client and server:
+
 ```bash
-# Install server dependencies
-cd server
+# Install root dependencies
 npm install
 
 # Install client dependencies
-cd ../client
-npm install
+cd client && npm install
+
+# Install server dependencies
+cd server && npm install
 ```
 
-3. Environment Setup:
+3. Copy the example environment files and update with your configuration:
 
-   - Create `.env` files for both client and server based on the provided `.env.example` files.
-   - Generate a secure JWT secret:
-   ```bash
-   cd server
-   npm run generate-secrets
-   ```
-   - Set up your MongoDB connection string in the server `.env` file.
-   - Add your Stripe and PayPal API keys to both client and server `.env` files.
+```bash
+# For client
+cp client/.env.example client/.env.local
+
+# For server
+cp server/.env.example server/.env
+```
 
 4. Start the development servers:
+
 ```bash
-# Start server (from server directory)
+# Run both client and server in parallel
 npm run dev
 
-# Start client (from client directory)
-npm run dev
+# Or run them separately
+npm run dev:client
+npm run dev:server
 ```
-
-5. Access the application:
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5000
-
-## API Routes
-
-### Authentication
-- `POST /api/auth/register` - Register a new admin user
-- `POST /api/auth/login` - Log in and get JWT token
-
-### Invoices
-- `GET /api/invoices` - Get all invoices (admin)
-- `GET /api/invoices/:id` - Get invoice by ID
-- `GET /api/invoices/number/:invoiceNumber` - Get invoice by invoice number
-- `POST /api/invoices` - Create a new invoice
-- `PUT /api/invoices/:id` - Update an invoice
-- `DELETE /api/invoices/:id` - Delete an invoice
-
-### Payments
-- `GET /api/payments/methods` - Get available payment methods
-- `POST /api/payments/stripe/create-intent` - Create Stripe payment intent
-- `POST /api/payments/stripe/confirm` - Confirm Stripe payment
-- `POST /api/payments/paypal/create-order` - Create PayPal order
-- `POST /api/payments/paypal/capture-payment` - Capture PayPal payment
-- `GET /api/payments/status/:invoiceId` - Get payment status for an invoice
 
 ## Deployment
 
-### Frontend
-- Build the Next.js application: `npm run build`
-- Deploy to Vercel, Netlify, or any other static hosting service
+This application is configured as a monorepo with separate deployments for the frontend and backend:
 
-### Backend
-- Deploy to Heroku, DigitalOcean, AWS, or any other Node.js hosting service
-- Set up environment variables on your hosting platform
-- Use a production-ready MongoDB database (like MongoDB Atlas)
+- **Frontend**: Deployed to Vercel
+- **Backend**: Deployed to Heroku
 
-## Security Considerations
+### Deploying to Vercel (Frontend)
 
-- All API keys and secrets are stored in environment variables
-- JWT authentication for secure API access
-- Rate limiting to prevent abuse
-- HTTPS for all production traffic
-- Input validation for all API endpoints
-- Proper error handling throughout the application
+1. Create a new project in Vercel and connect to your GitHub repository
+2. Set the following configuration in Vercel:
+   - Framework Preset: Next.js
+   - Root Directory: `client`
+   - Build Command: `npm run build`
+   - Install Command: `npm install`
+   - Output Directory: `.next`
+
+3. Set up the following environment variables in Vercel:
+   - `NEXT_PUBLIC_API_URL`: Your Heroku backend URL (e.g., https://your-app.herokuapp.com/api)
+   - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`: Your Stripe publishable key
+   - `NEXT_PUBLIC_PAYPAL_CLIENT_ID`: Your PayPal client ID
+
+4. Deploy the application
+
+### Deploying to Heroku (Backend)
+
+1. Create a new Heroku application
+2. Connect your GitHub repository to Heroku
+3. Add the following buildpacks:
+   - heroku/nodejs
+
+4. Set up the following environment variables in Heroku:
+   - `NODE_ENV`: production
+   - `FRONTEND_URL`: Your Vercel frontend URL (e.g., https://your-app.vercel.app)
+   - `MONGO_URI`: Your MongoDB connection string
+   - `JWT_SECRET`: A secure random string for JWT encryption
+   - `JWT_EXPIRE`: Token expiration time (e.g., 30d)
+   - `STRIPE_SECRET_KEY`: Your Stripe secret key
+   - `STRIPE_WEBHOOK_SECRET`: Your Stripe webhook secret
+   - `PAYPAL_CLIENT_ID`: Your PayPal client ID
+   - `PAYPAL_CLIENT_SECRET`: Your PayPal client secret
+   - `PAYPAL_MODE`: sandbox or live
+   - Email configuration:
+     - `SENDGRID_API_KEY` or `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER`, `EMAIL_PASSWORD`
+     - `EMAIL_FROM`: Sender email address
+
+5. Deploy the application
+
+## Important Notes for Deployment
+
+### CORS Configuration
+
+The backend is configured to accept requests only from specified origins. If you deploy to a custom domain, you'll need to update the CORS configuration in `server/src/server.js` to include your domain.
+
+### Webhooks for Payment Processing
+
+For Stripe and PayPal webhooks to work correctly in production:
+
+1. **Stripe**: Create a webhook in the Stripe dashboard pointing to: `https://your-heroku-app.herokuapp.com/api/payments/stripe/webhook`
+2. **PayPal**: Configure webhooks in your PayPal developer account to point to your backend
+
+### Environment Variables
+
+Always ensure sensitive information such as API keys and secrets are set as environment variables and never committed to the repository.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+[MIT](LICENSE)

@@ -1,12 +1,29 @@
 import axios from 'axios';
 import tokenService from './tokenService';
 
+// Determine API base URL
+const getBaseUrl = () => {
+  // Use environment variable if available
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  
+  // Fallback for development
+  if (process.env.NODE_ENV === 'development') {
+    return 'http://localhost:5000/api';
+  }
+  
+  // Production fallback (should be set by env var in production)
+  return 'https://your-app-name.herokuapp.com/api';
+};
+
 // Create an axios instance with baseURL and default headers
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  baseURL: getBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true // Important for CORS with credentials
 });
 
 // Add a request interceptor to include auth token

@@ -1,4 +1,5 @@
 const express = require('express');
+const validateEnvVariables = require('./config/validateEnv');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -20,6 +21,17 @@ const { apiLimiter, authLimiter, paymentLimiter } = require('./middleware/rateLi
 const app = express();
 const PORT = config.port;
 
+// Validate environment variables in production
+if (config.nodeEnv === 'production') {
+  const missingEnvVars = validateEnvVariables();
+  if (missingEnvVars.length > 0) {
+    console.error(`Missing required environment variables: ${missingEnvVars.join(', ')}`);
+    console.error('Please set these variables in your environment before starting the server in production mode.');
+    // In production, we might want to exit, but that's a bit harsh
+    // process.exit(1);
+  }
+}
+
 // Connect to MongoDB
 connectDB();
 
@@ -32,10 +44,38 @@ app.use('/api/payments/stripe/webhook', express.raw({ type: 'application/json' }
 // Standard middleware for other routes
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors({
-  origin: config.frontendUrl,
-  credentials: true
-}));
+// Configure CORS with multiple origins support
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is allowed
+    const allowedOrigins = [
+      config.frontendUrl,
+      // Add multiple production/staging URLs as needed
+      'https://invoice-pages.vercel.app',
+      'https://www.invoice-pages.vercel.app'
+    ];
+    
+    // In development, allow localhost
+    if (config.nodeEnv === 'development') {
+      allowedOrigins.push('http://localhost:3000');
+    }
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+      callback(null, true);
+    } else {
+      console.warn(`Origin ${origin} not allowed by CORS`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'stripe-signature']
+};
+
+app.use(cors(corsOptions));
 app.use(helmet()); // Security headers
 app.use(compression()); // Compress responses
 app.use(morgan('dev')); // Request logging
