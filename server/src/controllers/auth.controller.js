@@ -1,5 +1,6 @@
-const User = require('../models/User');
+const User = require('../models/user.model');
 const { ApiError } = require('../middleware/errorHandler');
+const supabase = require('../config/db');
 
 /**
  * @desc    Register a new user
@@ -8,24 +9,27 @@ const { ApiError } = require('../middleware/errorHandler');
  */
 exports.register = async (req, res, next) => {
   try {
-    const { name, email, password } = req.body;
+    const { full_name, email, password, company_name, company_address, company_phone, company_email } = req.body;
 
-    // Check if user exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      throw new ApiError('User with this email already exists', 400);
-    }
-
-    // Create user
+    // Create user with profile
     const user = await User.create({
-      name,
       email,
       password,
-      role: 'user' // Default role
+      full_name,
+      company_name,
+      company_address,
+      company_phone,
+      company_email
     });
 
     // Generate token
-    sendTokenResponse(user, 201, res);
+    const token = User.generateToken(user);
+
+    res.status(201).json({
+      success: true,
+      token,
+      user
+    });
   } catch (error) {
     next(error);
   }
@@ -40,25 +44,25 @@ exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
-    // Validate email and password
+    // Validate email & password
     if (!email || !password) {
-      throw new ApiError('Please provide email and password', 400);
+      throw new ApiError('Please provide an email and password', 400);
     }
 
-    // Check for user
-    const user = await User.findOne({ email }).select('+password');
-    if (!user) {
-      throw new ApiError('Invalid credentials', 401);
-    }
-
-    // Check if password matches
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch) {
-      throw new ApiError('Invalid credentials', 401);
-    }
+    // Check for user and authenticate
+    const user = await User.authenticate(email, password);
+    
+    // Get user profile
+    const profile = await User.findById(user.id);
 
     // Generate token
-    sendTokenResponse(user, 200, res);
+    const token = User.generateToken(profile);
+
+    res.status(200).json({
+      success: true,
+      token,
+      user: profile
+    });
   } catch (error) {
     next(error);
   }
@@ -88,22 +92,17 @@ exports.getMe = async (req, res, next) => {
  */
 exports.updateProfile = async (req, res, next) => {
   try {
-    const { name, email } = req.body;
+    const { full_name, company_name, company_address, company_phone, company_email } = req.body;
 
-    // Check if email is already taken (if changing email)
-    if (email !== req.user.email) {
-      const existingUser = await User.findOne({ email });
-      if (existingUser) {
-        throw new ApiError('Email already in use', 400);
-      }
-    }
+    const updateData = {
+      full_name,
+      company_name,
+      company_address,
+      company_phone,
+      company_email
+    };
 
-    // Update user
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      { name, email },
-      { new: true, runValidators: true }
-    );
+    const user = await User.update(req.user.id, updateData);
 
     res.status(200).json({
       success: true,
@@ -123,28 +122,19 @@ exports.changePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
-    // Validate input
     if (!currentPassword || !newPassword) {
       throw new ApiError('Please provide both current and new password', 400);
     }
 
-    // Get user with password
-    const user = await User.findById(req.user.id).select('+password');
+    // Re-authenticate user to verify current password
+    await User.authenticate(req.user.email, currentPassword);
 
-    // Check if current password matches
-    const isMatch = await user.matchPassword(currentPassword);
-    if (!isMatch) {
-      throw new ApiError('Current password is incorrect', 401);
-    }
+    // Update password in Supabase Auth
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword
+    });
 
-    // Validate new password
-    if (newPassword.length < 6) {
-      throw new ApiError('Password must be at least 6 characters', 400);
-    }
-
-    // Set new password
-    user.password = newPassword;
-    await user.save();
+    if (error) throw error;
 
     res.status(200).json({
       success: true,
@@ -156,34 +146,20 @@ exports.changePassword = async (req, res, next) => {
 };
 
 /**
- * @desc    Log user out / clear cookie
- * @route   GET /api/auth/logout
+ * @desc    Log user out
+ * @route   POST /api/auth/logout
  * @access  Private
  */
 exports.logout = async (req, res, next) => {
   try {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+
     res.status(200).json({
       success: true,
-      message: 'Successfully logged out'
+      message: 'Logged out successfully'
     });
   } catch (error) {
     next(error);
   }
-};
-
-/**
- * Helper function to send token response
- */
-const sendTokenResponse = (user, statusCode, res) => {
-  // Create token
-  const token = user.getSignedJwtToken();
-
-  // Remove password from output
-  user.password = undefined;
-
-  res.status(statusCode).json({
-    success: true,
-    token,
-    user
-  });
 };

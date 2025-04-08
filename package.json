@@ -14,8 +14,15 @@
   "engines": {
     "node": ">=16.0.0"
   },
-  "cacheDirectories": ["client/node_modules", "server/node_modules"],
+  "cacheDirectories": [
+    "client/node_modules",
+    "server/node_modules"
+  ],
   "devDependencies": {
     "concurrently": "^8.0.1"
+  },
+  "dependencies": {
+    "@paypal/checkout-server-sdk": "^1.0.3",
+    "stripe": "^17.7.0"
   }
 }

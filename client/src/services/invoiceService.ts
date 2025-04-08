@@ -34,7 +34,9 @@ export const getInvoiceById = (id: string) => {
 
 // Get invoice by invoice number (for public/client access)
 export const getInvoiceByNumber = (invoiceNumber: string) => {
-  return api.get<Invoice>(`/api/invoices/public/${invoiceNumber}`);
+  return api.get<Invoice>(`/api/portal/invoice`, {
+    params: { number: invoiceNumber }
+  });
 };
 
 // Create new invoice

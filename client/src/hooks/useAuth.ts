@@ -8,54 +8,80 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  useEffect(() => {
-    // Check if auth token exists and fetch user data
-    const fetchUser = async () => {
-      try {
-        if (authService.isLoggedIn()) {
-          const response = await authService.getCurrentUser();
-          setUser(response.data);
-        }
-      } catch (error) {
-        console.error('Failed to fetch user:', error);
-        authService.logout();
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUser();
-  }, []);
-
-  const login = async (email: string, password: string) => {
+  // Function to fetch user data
+  const fetchUser = async () => {
     try {
-      console.log('Attempting login with:', email);
-      const response = await authService.login(email, password);
-      
-      console.log('Login response:', response.data);
-      
-      if (response.data && response.data.token) {
-        localStorage.setItem('auth_token', response.data.token);
-        setUser(response.data.user);
-        return true;
-      } else {
-        console.error('Invalid login response format:', response.data);
-        toast.error('Server returned invalid response');
-        return false;
-      }
-    } catch (error: any) {
-      console.error('Login failed:', error);
-      const errorMessage = error.response?.data?.error?.message || 'Invalid credentials';
-      toast.error(errorMessage);
-      return false;
+      const userData = await authService.getCurrentUser();
+      setUser(userData);
+    } catch (error) {
+      console.error('Error fetching user:', error);
+      setUser(null);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const logout = () => {
-    authService.logout();
-    setUser(null);
-    router.push('/');
+  // Check auth status on mount
+  useEffect(() => {
+    fetchUser();
+  }, []);
+
+  // Login function
+  const login = async (email: string, password: string) => {
+    try {
+      setLoading(true);
+      const { user: userData } = await authService.login(email, password);
+      setUser(userData);
+      toast.success('Login successful');
+      router.replace('/admin/dashboard');
+      return true;
+    } catch (error: any) {
+      console.error('Login error:', error);
+      toast.error(error.message || 'Login failed');
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
 
-  return { user, loading, login, logout };
+  // Logout function
+  const logout = async () => {
+    try {
+      setLoading(true);
+      await authService.logout();
+      setUser(null);
+      router.replace('/admin/login');
+      toast.success('Logged out successfully');
+    } catch (error: any) {
+      console.error('Logout error:', error);
+      toast.error(error.message || 'Logout failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update profile function
+  const updateProfile = async (data: { name?: string; email?: string }) => {
+    try {
+      setLoading(true);
+      const updatedProfile = await authService.updateProfile(data);
+      setUser(prev => prev ? { ...prev, ...updatedProfile } : null);
+      toast.success('Profile updated successfully');
+    } catch (error: any) {
+      console.error('Update profile error:', error);
+      toast.error(error.message || 'Failed to update profile');
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return {
+    user,
+    loading,
+    login,
+    logout,
+    updateProfile,
+    isAdmin: user?.role === 'admin'
+  };
 }

@@ -2,150 +2,130 @@
  * Custom error class for API errors
  */
 class ApiError extends Error {
-  constructor(message, statusCode, data = null) {
+  constructor(message, statusCode = 500, errors = []) {
     super(message);
     this.statusCode = statusCode;
-    this.name = this.constructor.name;
-    this.data = data; // Additional error data
+    this.errors = errors;
+    this.status = `${statusCode}`.startsWith('4') ? 'fail' : 'error';
+    this.isOperational = true;
+
     Error.captureStackTrace(this, this.constructor);
   }
 }
 
 /**
- * Custom error class for validation errors
+ * Stripe error handler middleware
  */
-class ValidationError extends ApiError {
-  constructor(errors) {
-    super('Validation failed', 400, errors);
-    this.name = 'ValidationError';
-  }
-}
+const handleStripeErrors = (err, req, res, next) => {
+  if (err.type && err.type.startsWith('Stripe')) {
+    const message = err.message || 'An error occurred with the payment processor';
+    const statusCode = err.statusCode || 500;
 
-/**
- * Custom error class for unauthorized access
- */
-class UnauthorizedError extends ApiError {
-  constructor(message = 'Unauthorized access') {
-    super(message, 401);
-    this.name = 'UnauthorizedError';
+    return res.status(statusCode).json({
+      success: false,
+      error: {
+        message,
+        type: err.type
+      }
+    });
   }
-}
-
-/**
- * Custom error class for not found resources
- */
-class NotFoundError extends ApiError {
-  constructor(resource = 'Resource') {
-    super(`${resource} not found`, 404);
-    this.name = 'NotFoundError';
-  }
-}
-
-/**
- * Creates a standard error response
- */
-const errorResponse = (res, error) => {
-  const statusCode = error.statusCode || 500;
-  const message = error.message || 'Internal Server Error';
-  
-  const response = {
-    success: false,
-    error: {
-      message,
-      code: error.name || 'Error',
-      ...(error.data && { details: error.data })
-    }
-  };
-  
-  // Only include stack trace in development
-  if (process.env.NODE_ENV === 'development') {
-    response.error.stack = error.stack;
-  }
-  
-  return res.status(statusCode).json(response);
+  next(err);
 };
 
 /**
- * Mongoose error handler middleware
+ * PayPal error handler middleware
  */
-const handleMongooseErrors = (err, req, res, next) => {
-  let error = { ...err };
-  error.message = err.message;
-  
-  // Log the error for debugging
-  console.error(err);
+const handlePayPalErrors = (err, req, res, next) => {
+  if (err.name === 'PayPalError') {
+    const message = err.message || 'An error occurred with PayPal';
+    const statusCode = err.statusCode || 500;
 
-  // Handle mongoose validation errors
-  if (err.name === 'ValidationError') {
-    const message = Object.values(err.errors).map(val => val.message).join(', ');
-    error = new ApiError(message, 400);
+    return res.status(statusCode).json({
+      success: false,
+      error: {
+        message,
+        details: err.details
+      }
+    });
   }
-  
-  // Handle mongoose duplicate key error
-  if (err.code === 11000) {
-    const field = Object.keys(err.keyValue)[0];
-    const value = err.keyValue[field];
-    const message = `Duplicate field value: ${field} = ${value}. Please use another value`;
-    error = new ApiError(message, 400);
+  next(err);
+};
+
+/**
+ * Supabase error handler middleware
+ */
+const handleSupabaseErrors = (err, req, res, next) => {
+  if (err.message && err.message.includes('Supabase')) {
+    const message = err.message || 'Database error occurred';
+    const statusCode = err.statusCode || 500;
+
+    return res.status(statusCode).json({
+      success: false,
+      error: {
+        message,
+        code: err.code
+      }
+    });
   }
-  
-  // Handle mongoose cast error
-  if (err.name === 'CastError') {
-    const message = `Invalid ${err.path}: ${err.value}`;
-    error = new ApiError(message, 400);
+  next(err);
+};
+
+/**
+ * JWT error handler middleware
+ */
+const handleJWTErrors = (err, req, res, next) => {
+  if (err.name === 'JsonWebTokenError') {
+    return res.status(401).json({
+      success: false,
+      error: {
+        message: 'Invalid token. Please log in again.'
+      }
+    });
   }
-  
-  // Send the error response
-  return errorResponse(res, error);
+
+  if (err.name === 'TokenExpiredError') {
+    return res.status(401).json({
+      success: false,
+      error: {
+        message: 'Your token has expired. Please log in again.'
+      }
+    });
+  }
+
+  next(err);
 };
 
 /**
  * Global error handler middleware
  */
-const globalErrorHandler = (err, req, res, next) => {
-  // If headers already sent, delegate to Express's default error handler
-  if (res.headersSent) {
-    return next(err);
-  }
-  
-  // Log the error for debugging (but don't log in tests)
-  if (process.env.NODE_ENV !== 'test') {
-    console.error('Error:', err.name, err.message);
-    if (process.env.NODE_ENV === 'development') {
-      console.error(err.stack);
-    }
-  }
-  
-  // Handle specific error types
-  if (err instanceof ApiError) {
-    return errorResponse(res, err);
-  }
-  
-  // Handle Mongoose errors using the existing handler
-  if (err.name === 'ValidationError' || err.name === 'CastError' || err.code === 11000) {
-    return handleMongooseErrors(err, req, res, next);
-  }
-  
-  // Handle JWT errors
-  if (err.name === 'JsonWebTokenError') {
-    return errorResponse(res, new UnauthorizedError('Invalid token'));
-  }
-  
-  if (err.name === 'TokenExpiredError') {
-    return errorResponse(res, new UnauthorizedError('Token expired'));
-  }
-  
-  // Handle other types of errors
-  const error = new ApiError(err.message || 'Internal Server Error', err.statusCode || 500);
-  return errorResponse(res, error);
+const errorHandler = (err, req, res, next) => {
+  err.statusCode = err.statusCode || 500;
+  err.status = err.status || 'error';
+
+  // Handle specific error types using the existing handlers
+  handleStripeErrors(err, req, res, (error) => {
+    handlePayPalErrors(error, req, res, (error) => {
+      handleSupabaseErrors(error, req, res, (error) => {
+        handleJWTErrors(error, req, res, (error) => {
+          // If no specific error handler caught the error, send a generic response
+          res.status(error.statusCode).json({
+            success: false,
+            error: {
+              message: error.message || 'An unexpected error occurred',
+              ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+            }
+          });
+        });
+      });
+    });
+  });
 };
 
 module.exports = {
   ApiError,
-  ValidationError,
-  UnauthorizedError,
-  NotFoundError,
-  errorResponse,
-  handleMongooseErrors,
-  globalErrorHandler
+  errorHandler,
+  handleStripeErrors,
+  handlePayPalErrors,
+  handleSupabaseErrors,
+  handleJWTErrors
 };

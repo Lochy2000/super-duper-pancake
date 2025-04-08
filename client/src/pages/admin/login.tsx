@@ -1,120 +1,143 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NextPage } from 'next';
-import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { toast } from 'react-toastify';
+import { useRouter } from 'next/router';
+import { useForm } from 'react-hook-form';
 import { useAuth } from '../../hooks/useAuth';
 
-const Login: NextPage = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  
-  const { user, login } = useAuth();
+interface LoginForm {
+  email: string;
+  password: string;
+}
+
+const AdminLogin: NextPage = () => {
+  const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>();
+  const { user, loading: authLoading, login } = useAuth();
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
-  
+
   // Redirect if already logged in
   useEffect(() => {
-    if (user) {
-      router.push('/admin/dashboard');
+    if (!authLoading && user) {
+      router.replace('/admin/dashboard');
     }
-  }, [user, router]);
-  
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
+  }, [user, authLoading, router]);
+
+  // If loading or already authenticated, show loading state
+  if (authLoading || user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  const onSubmit = async (data: LoginForm) => {
     try {
-      setLoading(true);
-      
-      if (!email || !password) {
-        toast.error('Please enter both email and password');
-        return;
-      }
-      
-      // Log the credentials for debugging in development
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Attempting login with:', { email });
-      }
-      
-      const success = await login(email, password);
-      
-      if (success) {
-        toast.success('Login successful');
-        router.push('/admin/dashboard');
-      } else {
-        toast.error('Invalid credentials');
+      setIsSubmitting(true);
+      const success = await login(data.email, data.password);
+      if (!success) {
+        setIsSubmitting(false);
       }
     } catch (error) {
-      console.error('Login error:', error);
-      toast.error('Login failed');
-    } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
-  
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+    <>
       <Head>
-        <title>Admin Login | Invoice System</title>
+        <title>Admin Login - Invoice System</title>
       </Head>
-      
-      <div className="max-w-md w-full p-8 card">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold">Admin Login</h1>
-          <p className="text-gray-600 mt-2">Sign in to access the admin dashboard</p>
-        </div>
-        
-        <form onSubmit={handleSubmit} className="space-y-6">
+
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              className="form-input"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+            <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+              Admin Login
+            </h2>
           </div>
-          
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              className="form-input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          
-          <button 
-            type="submit" 
-            className="btn-primary w-full"
-            disabled={loading}
-          >
-            {loading ? (
-              <span className="flex items-center justify-center">
-                <span className="animate-spin mr-2 h-4 w-4 border-t-2 border-b-2 border-white rounded-full"></span>
-                Signing in...
-              </span>
-            ) : 'Sign in'}
-          </button>
-        </form>
-        
-        <div className="mt-6 text-center">
-          <a href="/" className="text-primary-600 hover:text-primary-700 text-sm">
-            Return to Home
-          </a>
+          <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
+            <div className="rounded-md shadow-sm -space-y-px">
+              <div>
+                <label htmlFor="email" className="sr-only">
+                  Email address
+                </label>
+                <input
+                  {...register('email', {
+                    required: 'Email is required',
+                    pattern: {
+                      value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                      message: 'Invalid email address'
+                    }
+                  })}
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  className={`appearance-none rounded-none relative block w-full px-3 py-2 border ${
+                    errors.email ? 'border-red-300' : 'border-gray-300'
+                  } placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
+                  placeholder="Email address"
+                />
+                {errors.email && (
+                  <p className="mt-1 text-sm text-red-600">
+                    {errors.email.message}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label htmlFor="password" className="sr-only">
+                  Password
+                </label>
+                <input
+                  {...register('password', {
+                    required: 'Password is required',
+                    minLength: {
+                      value: 6,
+                      message: 'Password must be at least 6 characters'
+                    }
+                  })}
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  className={`appearance-none rounded-none relative block w-full px-3 py-2 border ${
+                    errors.password ? 'border-red-300' : 'border-gray-300'
+                  } placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm`}
+                  placeholder="Password"
+                />
+                {errors.password && (
+                  <p className="mt-1 text-sm text-red-600">
+                    {errors.password.message}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white ${
+                  isSubmitting
+                    ? 'bg-blue-400 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500`}
+              >
+                {isSubmitting ? (
+                  <div className="flex items-center">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                    Signing in...
+                  </div>
+                ) : (
+                  'Sign in'
+                )}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
-    </div>
+    </>
   );
 };
 
-export default Login;
+export default AdminLogin;

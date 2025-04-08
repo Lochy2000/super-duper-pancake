@@ -1,8 +1,8 @@
 const stripe = require('stripe')(require('../config/env').stripe.secretKey);
 const paypal = require('@paypal/checkout-server-sdk');
 const config = require('../config/env');
-const Invoice = require('../models/Invoice');
-const Payment = require('../models/Payment');
+const { Invoice } = require('../models/invoice.model');
+const { Payment } = require('../models/payment.model');
 const { ApiError } = require('../middleware/errorHandler');
 const emailService = require('../services/email.service');
 
@@ -26,13 +26,13 @@ exports.getPaymentMethods = async (req, res, next) => {
     const methods = [];
     
     if (config.stripe.secretKey) {
-      methods.push({ id: 'stripe', name: 'stripe' });
+      methods.push({ id: 'stripe', name: 'Credit Card (Stripe)' });
     }
     
     if (config.paypal.clientId && config.paypal.clientSecret) {
-      methods.push({ id: 'paypal', name: 'paypal' });
+      methods.push({ id: 'paypal', name: 'PayPal' });
     }
-    
+
     res.status(200).json({
       success: true,
       data: methods
@@ -50,99 +50,43 @@ exports.getPaymentMethods = async (req, res, next) => {
 exports.createStripePaymentIntent = async (req, res, next) => {
   try {
     const { invoiceId } = req.body;
-    
-    if (!invoiceId) {
-      throw new ApiError('Invoice ID is required', 400);
-    }
-    
-    // Find invoice
+
+    // Get invoice
     const invoice = await Invoice.findById(invoiceId);
-    
     if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${invoiceId}`, 404);
+      throw new ApiError('Invoice not found', 404);
     }
-    
+
+    // Check if invoice is already paid
     if (invoice.status === 'paid') {
-      throw new ApiError('This invoice has already been paid', 400);
+      throw new ApiError('Invoice is already paid', 400);
     }
-    
-    // Create a payment intent
+
+    // Create payment intent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(invoice.total * 100), // Stripe expects amount in cents
+      amount: Math.round(invoice.total * 100), // Convert to cents
       currency: 'usd',
       metadata: {
-        invoiceId: invoice._id.toString(),
-        invoiceNumber: invoice.invoiceNumber,
-        clientEmail: invoice.clientEmail,
-        integration_check: 'accept_a_payment'
+        invoiceId,
+        invoiceNumber: invoice.invoice_number
       }
     });
-    
+
+    // Create payment record
+    await Payment.create({
+      user_id: invoice.user_id,
+      invoice_id: invoice.id,
+      amount: invoice.total,
+      payment_method: 'stripe',
+      status: 'pending',
+      payment_intent_id: paymentIntent.id
+    });
+
     res.status(200).json({
       success: true,
       data: {
-        clientSecret: paymentIntent.client_secret,
-        id: paymentIntent.id,
-        amount: invoice.total
+        clientSecret: paymentIntent.client_secret
       }
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * @desc    Confirm Stripe payment
- * @route   POST /api/payments/stripe/confirm
- * @access  Public
- */
-exports.confirmStripePayment = async (req, res, next) => {
-  try {
-    const { paymentIntentId, invoiceId } = req.body;
-    
-    if (!paymentIntentId || !invoiceId) {
-      throw new ApiError('Payment Intent ID and Invoice ID are required', 400);
-    }
-    
-    // Find invoice
-    const invoice = await Invoice.findById(invoiceId);
-    
-    if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${invoiceId}`, 404);
-    }
-    
-    // Get payment intent from Stripe
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    
-    if (paymentIntent.status !== 'succeeded') {
-      throw new ApiError(`Payment has not been completed. Status: ${paymentIntent.status}`, 400);
-    }
-    
-    // Create payment record
-    const payment = await Payment.create({
-      invoiceId: invoice._id,
-      method: 'stripe',
-      transactionId: paymentIntentId,
-      amount: invoice.total,
-      status: 'success',
-      metadata: {
-        stripePaymentIntent: paymentIntent.id,
-        paymentMethod: paymentIntent.payment_method
-      }
-    });
-    
-    // Update invoice status
-    invoice.status = 'paid';
-    invoice.paymentMethod = 'stripe';
-    invoice.transactionId = paymentIntentId;
-    await invoice.save();
-    
-    // Send confirmation email
-    await emailService.sendPaymentConfirmationEmail(invoice);
-    
-    res.status(200).json({
-      success: true,
-      data: payment
     });
   } catch (error) {
     next(error);
@@ -156,74 +100,63 @@ exports.confirmStripePayment = async (req, res, next) => {
  */
 exports.stripeWebhook = async (req, res, next) => {
   try {
-    const signature = req.headers['stripe-signature'];
-    
-    if (!signature) {
-      return res.status(400).json({ success: false, error: 'Stripe signature missing' });
-    }
-    
+    const sig = req.headers['stripe-signature'];
     let event;
-    
+
     try {
-      // For rawBody to work, we need to have used the rawBodyMiddleware
-      // and the route should be using express.raw({ type: 'application/json' })
-      const payload = req.rawBody || req.body;
-      
-      if (!payload) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'Missing request body, ensure rawBodyMiddleware is applied to this route' 
-        });
-      }
-      
-      // For string payload
-      const payloadForVerification = typeof payload === 'string' 
-        ? payload 
-        : JSON.stringify(payload);
-      
       event = stripe.webhooks.constructEvent(
-        payloadForVerification,
-        signature,
+        req.rawBody,
+        sig,
         config.stripe.webhookSecret
       );
     } catch (err) {
-      console.error('Webhook error:', err.message);
-      return res.status(400).json({ success: false, error: `Webhook signature verification failed: ${err.message}` });
+      throw new ApiError(`Webhook Error: ${err.message}`, 400);
     }
-    
+
     // Handle the event
-    if (event.type === 'payment_intent.succeeded') {
-      const paymentIntent = event.data.object;
-      const invoiceId = paymentIntent.metadata.invoiceId;
-      
-      // Find invoice
-      const invoice = await Invoice.findById(invoiceId);
-      
-      if (invoice && invoice.status !== 'paid') {
-        // Create payment record
-        await Payment.create({
-          invoiceId: invoice._id,
-          method: 'stripe',
-          transactionId: paymentIntent.id,
-          amount: invoice.total,
-          status: 'success',
-          metadata: {
-            stripePaymentIntent: paymentIntent.id,
-            paymentMethod: paymentIntent.payment_method
-          }
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        const paymentIntent = event.data.object;
+        
+        // Update payment record
+        const payment = await Payment.findOne({
+          payment_intent_id: paymentIntent.id
         });
         
-        // Update invoice status
-        invoice.status = 'paid';
-        invoice.paymentMethod = 'stripe';
-        invoice.transactionId = paymentIntent.id;
-        await invoice.save();
+        if (payment) {
+          await Payment.update(payment.id, {
+            status: 'completed',
+            transaction_id: paymentIntent.id
+          });
+
+          // Update invoice status
+          await Invoice.updateStatus(payment.invoice_id, 'paid');
+
+          // Get updated invoice
+          const invoice = await Invoice.findById(payment.invoice_id);
+
+          // Send confirmation email
+          try {
+            await emailService.sendPaymentConfirmation(invoice);
+          } catch (emailError) {
+            console.error('Failed to send payment confirmation email:', emailError);
+          }
+        }
+        break;
+
+      case 'payment_intent.payment_failed':
+        const failedPaymentIntent = event.data.object;
         
-        // Send confirmation email
-        await emailService.sendPaymentConfirmationEmail(invoice);
-      }
+        // Update payment record
+        await Payment.update({
+          payment_intent_id: failedPaymentIntent.id
+        }, {
+          status: 'failed',
+          error: failedPaymentIntent.last_payment_error?.message
+        });
+        break;
     }
-    
+
     res.status(200).json({ received: true });
   } catch (error) {
     next(error);
@@ -238,52 +171,49 @@ exports.stripeWebhook = async (req, res, next) => {
 exports.createPayPalOrder = async (req, res, next) => {
   try {
     const { invoiceId } = req.body;
-    
-    if (!invoiceId) {
-      throw new ApiError('Invoice ID is required', 400);
-    }
-    
-    // Find invoice
+
+    // Get invoice
     const invoice = await Invoice.findById(invoiceId);
-    
     if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${invoiceId}`, 404);
+      throw new ApiError('Invoice not found', 404);
     }
-    
+
+    // Check if invoice is already paid
     if (invoice.status === 'paid') {
-      throw new ApiError('This invoice has already been paid', 400);
+      throw new ApiError('Invoice is already paid', 400);
     }
-    
-    // Create PayPal client
-    const paypalClient = getPayPalClient();
-    
-    // Create order request
+
+    // Create PayPal order
     const request = new paypal.orders.OrdersCreateRequest();
-    request.prefer('return=representation');
+    request.prefer("return=representation");
     request.requestBody({
       intent: 'CAPTURE',
       purchase_units: [{
         amount: {
           currency_code: 'USD',
-          value: invoice.total.toFixed(2)
+          value: invoice.total.toString()
         },
-        description: `Invoice #${invoice.invoiceNumber}`,
-        custom_id: invoice._id.toString(),
-        invoice_id: invoice.invoiceNumber
-      }],
-      application_context: {
-        brand_name: 'Your Company Name',
-        shipping_preference: 'NO_SHIPPING'
-      }
+        custom_id: invoice.id,
+        description: `Payment for invoice #${invoice.invoice_number}`
+      }]
     });
-    
-    // Call PayPal API
-    const order = await paypalClient.execute(request);
-    
+
+    const order = await getPayPalClient().execute(request);
+
+    // Create payment record
+    await Payment.create({
+      user_id: invoice.user_id,
+      invoice_id: invoice.id,
+      amount: invoice.total,
+      payment_method: 'paypal',
+      status: 'pending',
+      payment_intent_id: order.result.id
+    });
+
     res.status(200).json({
       success: true,
       data: {
-        id: order.result.id
+        orderId: order.result.id
       }
     });
   } catch (error) {
@@ -298,53 +228,43 @@ exports.createPayPalOrder = async (req, res, next) => {
  */
 exports.capturePayPalPayment = async (req, res, next) => {
   try {
-    const { orderId, invoiceId } = req.body;
-    
-    if (!orderId || !invoiceId) {
-      throw new ApiError('Order ID and Invoice ID are required', 400);
-    }
-    
-    // Find invoice
-    const invoice = await Invoice.findById(invoiceId);
-    
-    if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${invoiceId}`, 404);
-    }
-    
-    // Create PayPal client
-    const paypalClient = getPayPalClient();
-    
-    // Capture payment
+    const { orderId } = req.body;
+
     const request = new paypal.orders.OrdersCaptureRequest(orderId);
-    request.prefer('return=representation');
-    const response = await paypalClient.execute(request);
+    request.requestBody({});
     
-    const captureId = response.result.purchase_units[0].payments.captures[0].id;
-    
-    // Create payment record
-    const payment = await Payment.create({
-      invoiceId: invoice._id,
-      method: 'paypal',
-      transactionId: captureId,
-      amount: invoice.total,
-      status: 'success',
-      metadata: {
-        paypalOrderId: orderId
+    const capture = await getPayPalClient().execute(request);
+
+    if (capture.result.status === 'COMPLETED') {
+      const payment = await Payment.findOne({
+        payment_intent_id: orderId
+      });
+
+      if (payment) {
+        // Update payment record
+        await Payment.update(payment.id, {
+          status: 'completed',
+          transaction_id: capture.result.id
+        });
+
+        // Update invoice status
+        await Invoice.updateStatus(payment.invoice_id, 'paid');
+
+        // Get updated invoice
+        const invoice = await Invoice.findById(payment.invoice_id);
+
+        // Send confirmation email
+        try {
+          await emailService.sendPaymentConfirmation(invoice);
+        } catch (emailError) {
+          console.error('Failed to send payment confirmation email:', emailError);
+        }
       }
-    });
-    
-    // Update invoice status
-    invoice.status = 'paid';
-    invoice.paymentMethod = 'paypal';
-    invoice.transactionId = captureId;
-    await invoice.save();
-    
-    // Send confirmation email
-    await emailService.sendPaymentConfirmationEmail(invoice);
-    
+    }
+
     res.status(200).json({
       success: true,
-      data: payment
+      data: capture.result
     });
   } catch (error) {
     next(error);
@@ -358,23 +278,16 @@ exports.capturePayPalPayment = async (req, res, next) => {
  */
 exports.getPaymentStatus = async (req, res, next) => {
   try {
-    const { invoiceId } = req.params;
+    const payments = await Payment.findByInvoiceId(req.params.invoiceId);
     
-    // Find invoice
-    const invoice = await Invoice.findById(invoiceId);
-    
-    if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${invoiceId}`, 404);
-    }
-    
-    // Find payment record
-    const payment = await Payment.findOne({ invoiceId: invoiceId }).sort({ createdAt: -1 });
+    const latestPayment = payments[0];
     
     res.status(200).json({
       success: true,
       data: {
-        invoiceStatus: invoice.status,
-        payment: payment || null
+        status: latestPayment?.status || 'no_payment',
+        paymentMethod: latestPayment?.payment_method,
+        lastUpdated: latestPayment?.updated_at
       }
     });
   } catch (error) {

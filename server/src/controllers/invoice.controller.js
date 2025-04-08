@@ -1,4 +1,4 @@
-const Invoice = require('../models/Invoice');
+const Invoice = require('../models/invoice.model');
 const { ApiError } = require('../middleware/errorHandler');
 const emailService = require('../services/email.service');
 
@@ -9,11 +9,16 @@ const emailService = require('../services/email.service');
  */
 exports.getInvoices = async (req, res, next) => {
   try {
-    // If user is admin, get all invoices, otherwise get only the ones they created
-    const query = req.user.role === 'admin' ? {} : { creator: req.user.id };
-    
-    const invoices = await Invoice.find(query).sort({ createdAt: -1 });
-    
+    const query = {};
+    if (req.query.status) query.status = req.query.status;
+    if (req.query.clientId) query.clientId = req.query.clientId;
+    if (req.query.startDate) query.startDate = req.query.startDate;
+    if (req.query.endDate) query.endDate = req.query.endDate;
+    if (req.query.sortBy) query.sortBy = req.query.sortBy;
+    if (req.query.sortOrder) query.sortOrder = req.query.sortOrder;
+
+    const invoices = await Invoice.findByUser(req.user.id, query);
+
     res.status(200).json({
       success: true,
       count: invoices.length,
@@ -34,14 +39,14 @@ exports.getInvoice = async (req, res, next) => {
     const invoice = await Invoice.findById(req.params.id);
     
     if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${req.params.id}`, 404);
+      throw new ApiError('Invoice not found', 404);
     }
-    
-    // Check if user has permission to view this invoice
-    if (req.user.role !== 'admin' && invoice.creator.toString() !== req.user.id) {
-      throw new ApiError(`User not authorized to view this invoice`, 403);
+
+    // Check ownership
+    if (invoice.user_id !== req.user.id) {
+      throw new ApiError('Not authorized to access this invoice', 403);
     }
-    
+
     res.status(200).json({
       success: true,
       data: invoice
@@ -58,14 +63,12 @@ exports.getInvoice = async (req, res, next) => {
  */
 exports.getInvoiceByNumber = async (req, res, next) => {
   try {
-    const invoice = await Invoice.findOne({
-      invoiceNumber: req.params.invoiceNumber
-    });
+    const invoice = await Invoice.findByNumber(req.params.invoiceNumber);
     
     if (!invoice) {
-      throw new ApiError(`Invoice not found with number ${req.params.invoiceNumber}`, 404);
+      throw new ApiError('Invoice not found', 404);
     }
-    
+
     res.status(200).json({
       success: true,
       data: invoice
@@ -82,25 +85,31 @@ exports.getInvoiceByNumber = async (req, res, next) => {
  */
 exports.createInvoice = async (req, res, next) => {
   try {
-    // Add creator to req.body
-    req.body.creator = req.user.id;
-    
-    // Validate items
-    if (!req.body.items || req.body.items.length === 0) {
-      throw new ApiError('Please add at least one item to the invoice', 400);
-    }
-    
+    const { clientId, items, dueDate, notes } = req.body;
+
+    // Calculate totals
+    const { subtotal, tax, total } = await Invoice.calculateTotals(items);
+
     // Create invoice
-    const invoice = await Invoice.create(req.body);
-    
-    // Send email notification if requested
-    if (req.body.sendEmail) {
-      await emailService.sendInvoiceCreatedEmail(invoice);
-    }
-    
+    const invoice = await Invoice.create({
+      user_id: req.user.id,
+      client_id: clientId,
+      due_date: dueDate,
+      notes,
+      subtotal,
+      tax,
+      total
+    });
+
+    // Add items
+    await Invoice.addItems(invoice.id, items);
+
+    // Get complete invoice with items
+    const completeInvoice = await Invoice.findById(invoice.id);
+
     res.status(201).json({
       success: true,
-      data: invoice
+      data: completeInvoice
     });
   } catch (error) {
     next(error);
@@ -114,31 +123,42 @@ exports.createInvoice = async (req, res, next) => {
  */
 exports.updateInvoice = async (req, res, next) => {
   try {
-    let invoice = await Invoice.findById(req.params.id);
-    
-    if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${req.params.id}`, 404);
+    const { clientId, items, dueDate, notes } = req.body;
+
+    // Check if invoice exists and user owns it
+    const existingInvoice = await Invoice.findById(req.params.id);
+    if (!existingInvoice) {
+      throw new ApiError('Invoice not found', 404);
     }
-    
-    // Check if user has permission to update this invoice
-    if (req.user.role !== 'admin' && invoice.creator.toString() !== req.user.id) {
-      throw new ApiError(`User not authorized to update this invoice`, 403);
+    if (existingInvoice.user_id !== req.user.id) {
+      throw new ApiError('Not authorized to update this invoice', 403);
     }
-    
-    // Prevent updating invoiceNumber
-    if (req.body.invoiceNumber && req.body.invoiceNumber !== invoice.invoiceNumber) {
-      throw new ApiError('Invoice number cannot be changed', 400);
+
+    // Calculate new totals if items are provided
+    let totals = {};
+    if (items) {
+      totals = await Invoice.calculateTotals(items);
     }
-    
+
     // Update invoice
-    invoice = await Invoice.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true
+    const invoice = await Invoice.update(req.params.id, {
+      client_id: clientId,
+      due_date: dueDate,
+      notes,
+      ...totals
     });
-    
+
+    // Update items if provided
+    if (items) {
+      await Invoice.updateItems(invoice.id, items);
+    }
+
+    // Get complete updated invoice
+    const updatedInvoice = await Invoice.findById(invoice.id);
+
     res.status(200).json({
       success: true,
-      data: invoice
+      data: updatedInvoice
     });
   } catch (error) {
     next(error);
@@ -152,19 +172,17 @@ exports.updateInvoice = async (req, res, next) => {
  */
 exports.deleteInvoice = async (req, res, next) => {
   try {
+    // Check if invoice exists and user owns it
     const invoice = await Invoice.findById(req.params.id);
-    
     if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${req.params.id}`, 404);
+      throw new ApiError('Invoice not found', 404);
     }
-    
-    // Check if user has permission to delete this invoice
-    if (req.user.role !== 'admin' && invoice.creator.toString() !== req.user.id) {
-      throw new ApiError(`User not authorized to delete this invoice`, 403);
+    if (invoice.user_id !== req.user.id) {
+      throw new ApiError('Not authorized to delete this invoice', 403);
     }
-    
-    await invoice.deleteOne();
-    
+
+    await Invoice.delete(req.params.id);
+
     res.status(200).json({
       success: true,
       data: {}
@@ -181,27 +199,27 @@ exports.deleteInvoice = async (req, res, next) => {
  */
 exports.markInvoiceAsPaid = async (req, res, next) => {
   try {
-    let invoice = await Invoice.findById(req.params.id);
-    
+    // Check if invoice exists and user owns it
+    const invoice = await Invoice.findById(req.params.id);
     if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${req.params.id}`, 404);
+      throw new ApiError('Invoice not found', 404);
     }
-    
-    // Update status to paid
-    invoice = await Invoice.findByIdAndUpdate(
-      req.params.id,
-      { status: 'paid' },
-      { new: true, runValidators: true }
-    );
-    
-    // Send payment confirmation email if applicable
-    if (req.body.sendEmail) {
-      await emailService.sendPaymentConfirmationEmail(invoice);
+    if (invoice.user_id !== req.user.id) {
+      throw new ApiError('Not authorized to update this invoice', 403);
     }
-    
+
+    const updatedInvoice = await Invoice.updateStatus(req.params.id, 'paid');
+
+    // Send confirmation email
+    try {
+      await emailService.sendPaymentConfirmation(updatedInvoice);
+    } catch (emailError) {
+      console.error('Failed to send payment confirmation email:', emailError);
+    }
+
     res.status(200).json({
       success: true,
-      data: invoice
+      data: updatedInvoice
     });
   } catch (error) {
     next(error);
@@ -218,27 +236,18 @@ exports.sendInvoiceEmail = async (req, res, next) => {
     const invoice = await Invoice.findById(req.params.id);
     
     if (!invoice) {
-      throw new ApiError(`Invoice not found with id of ${req.params.id}`, 404);
+      throw new ApiError('Invoice not found', 404);
     }
-    
-    // Check if user has permission
-    if (req.user.role !== 'admin' && invoice.creator.toString() !== req.user.id) {
-      throw new ApiError(`User not authorized to send this invoice`, 403);
+
+    if (invoice.user_id !== req.user.id) {
+      throw new ApiError('Not authorized to send this invoice', 403);
     }
-    
-    // Get email from request or use client email
-    const email = req.body.email || invoice.clientEmail;
-    
-    if (!email) {
-      throw new ApiError('Email address is required', 400);
-    }
-    
-    // Send email
-    await emailService.sendInvoiceCreatedEmail(invoice, email);
-    
+
+    await emailService.sendInvoice(invoice);
+
     res.status(200).json({
       success: true,
-      message: `Invoice sent to ${email}`
+      message: 'Invoice sent successfully'
     });
   } catch (error) {
     next(error);
@@ -252,54 +261,55 @@ exports.sendInvoiceEmail = async (req, res, next) => {
  */
 exports.getInvoiceStats = async (req, res, next) => {
   try {
-    // Base query - if admin, get all stats, otherwise only user's invoices
-    const baseQuery = req.user.role === 'admin' ? {} : { creator: req.user.id };
+    const invoices = await Invoice.findByUser(req.user.id);
+
+    const stats = {
+      total: invoices.length,
+      paid: invoices.filter(inv => inv.status === 'paid').length,
+      pending: invoices.filter(inv => inv.status === 'pending').length,
+      totalAmount: invoices.reduce((acc, inv) => acc + inv.total, 0),
+      paidAmount: invoices.filter(inv => inv.status === 'paid')
+        .reduce((acc, inv) => acc + inv.total, 0),
+      pendingAmount: invoices.filter(inv => inv.status === 'pending')
+        .reduce((acc, inv) => acc + inv.total, 0)
+    };
+
+    // Calculate monthly stats for the last 6 months
+    const now = new Date();
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
     
-    // Count by status
-    const totalCount = await Invoice.countDocuments(baseQuery);
-    const paidCount = await Invoice.countDocuments({ ...baseQuery, status: 'paid' });
-    const unpaidCount = await Invoice.countDocuments({ ...baseQuery, status: 'unpaid' });
-    const overdueCount = await Invoice.countDocuments({ ...baseQuery, status: 'overdue' });
-    
-    // Sum total amounts
-    const totalAmountAggregation = await Invoice.aggregate([
-      { $match: baseQuery },
-      { $group: { _id: null, total: { $sum: '$total' } } }
-    ]);
-    
-    const totalAmount = totalAmountAggregation.length > 0 ? totalAmountAggregation[0].total : 0;
-    
-    // Sum paid amounts
-    const paidAmountAggregation = await Invoice.aggregate([
-      { $match: { ...baseQuery, status: 'paid' } },
-      { $group: { _id: null, total: { $sum: '$total' } } }
-    ]);
-    
-    const paidAmount = paidAmountAggregation.length > 0 ? paidAmountAggregation[0].total : 0;
-    
-    // Sum unpaid amounts
-    const unpaidAmountAggregation = await Invoice.aggregate([
-      { $match: { ...baseQuery, status: { $ne: 'paid' } } },
-      { $group: { _id: null, total: { $sum: '$total' } } }
-    ]);
-    
-    const unpaidAmount = unpaidAmountAggregation.length > 0 ? unpaidAmountAggregation[0].total : 0;
-    
+    const monthlyStats = invoices
+      .filter(inv => new Date(inv.created_at) >= sixMonthsAgo)
+      .reduce((acc, inv) => {
+        const date = new Date(inv.created_at);
+        const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        
+        if (!acc[monthYear]) {
+          acc[monthYear] = {
+            month: monthYear,
+            count: 0,
+            amount: 0,
+            paid: 0,
+            paidAmount: 0
+          };
+        }
+        
+        acc[monthYear].count++;
+        acc[monthYear].amount += inv.total;
+        
+        if (inv.status === 'paid') {
+          acc[monthYear].paid++;
+          acc[monthYear].paidAmount += inv.total;
+        }
+        
+        return acc;
+      }, {});
+
+    stats.monthly = Object.values(monthlyStats);
+
     res.status(200).json({
       success: true,
-      data: {
-        counts: {
-          total: totalCount,
-          paid: paidCount,
-          unpaid: unpaidCount,
-          overdue: overdueCount
-        },
-        amounts: {
-          total: totalAmount,
-          paid: paidAmount,
-          unpaid: unpaidAmount
-        }
-      }
+      data: stats
     });
   } catch (error) {
     next(error);

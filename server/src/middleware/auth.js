@@ -1,79 +1,63 @@
-const jwt = require('jsonwebtoken');
+const { createClient } = require('@supabase/supabase-js');
 const config = require('../config/env');
-const User = require('../models/User');
+const { ApiError } = require('./errorHandler');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 
 /**
- * Middleware to protect routes - validates JWT token
+ * Middleware to protect routes - validates Supabase token
  */
 exports.protect = async (req, res, next) => {
   try {
     let token;
 
     // Check for token in Authorization header
-    if (
-      req.headers.authorization &&
-      req.headers.authorization.startsWith('Bearer')
-    ) {
-      // Get token from header
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     }
 
     // Check if token exists
     if (!token) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          message: 'Not authorized to access this route'
-        }
-      });
+      throw new ApiError('Not authorized to access this route', 401);
     }
 
     try {
-      // Verify token
-      const decoded = jwt.verify(token, config.jwt.secret);
+      // Verify token with Supabase
+      const { data: { user }, error } = await supabase.auth.getUser(token);
+      
+      if (error || !user) {
+        console.error('Supabase auth error:', error);
+        throw new ApiError('Not authorized to access this route', 401);
+      }
 
-      // Check token expiration explicitly
-      const currentTimestamp = Math.floor(Date.now() / 1000);
-      if (decoded.exp && decoded.exp < currentTimestamp) {
-        return res.status(401).json({
-          success: false,
-          error: {
-            message: 'Token has expired'
-          }
-        });
+      // Get user profile
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, email, full_name, role')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) {
+        console.error('Profile fetch error:', profileError);
       }
 
       // Add user to request object
-      const user = await User.findById(decoded.id);
-
-      if (!user) {
-        return res.status(401).json({
-          success: false,
-          error: {
-            message: 'User not found'
-          }
-        });
-      }
-      
-      // Set user in request object
-      req.user = user;
-      
-      // Log successful authentication
-      console.log(`User ${user._id} (${user.email}) authenticated successfully`);
+      req.user = {
+        id: user.id,
+        email: user.email,
+        role: profile?.role || 'user',
+        name: profile?.full_name
+      };
       
       next();
-    } catch (err) {
-      console.error('Token verification error:', err.message);
-      return res.status(401).json({
-        success: false,
-        error: {
-          message: 'Invalid or expired token',
-          details: err.message
-        }
-      });
+    } catch (error) {
+      console.error('Auth error:', error);
+      throw new ApiError('Not authorized to access this route', 401);
     }
   } catch (error) {
-    console.error('Auth middleware error:', error);
     next(error);
   }
 };
@@ -85,11 +69,7 @@ exports.protect = async (req, res, next) => {
 exports.authorize = (...roles) => {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({
-        error: {
-          message: `User role ${req.user ? req.user.role : 'undefined'} is not authorized to access this route`
-        }
-      });
+      throw new ApiError(`User role ${req.user ? req.user.role : 'undefined'} is not authorized to access this route`, 403);
     }
     next();
   };

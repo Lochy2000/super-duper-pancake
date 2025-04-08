@@ -1,141 +1,36 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const config = require('../config/env');
-const brevoService = require('./brevo.service');
+
+// Initialize Resend
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Flag to control email sending (useful for testing)
 const SEND_EMAILS = true;
 
-// Create nodemailer transporter
-const getTransporter = () => {
-  // Check if SendGrid API key is available
-  if (config.email.sendgridApiKey) {
-    return nodemailer.createTransport({
-      service: 'SendGrid',
-      auth: {
-        user: 'apikey',
-        pass: config.email.sendgridApiKey
-      }
-    });
-  }
-  
-  // Check if using Brevo SMTP
-  if (config.email.host && config.email.host.includes('brevo')) {
-    console.log('Configuring email transport for Brevo SMTP');
-    return nodemailer.createTransport({
-      host: config.email.host,
-      port: config.email.port,
-      secure: false, // Brevo uses STARTTLS on port 587
-      auth: {
-        user: config.email.user,
-        pass: config.email.password
-      }
-    });
-  }
-  
-  // Check if using Outlook/Hotmail
-  const isOutlook = config.email.host && (
-    config.email.host.includes('outlook') || 
-    config.email.host.includes('hotmail') || 
-    config.email.host.includes('office365')
-  );
-
-  // Configure specifically for Outlook/Hotmail
-  if (isOutlook) {
-    console.log('Configuring email transport for Outlook/Hotmail');
-    return nodemailer.createTransport({
-      host: config.email.host,
-      port: config.email.port,
-      secure: false, // Outlook uses STARTTLS on port 587
-      auth: {
-        user: config.email.user,
-        pass: config.email.password
-      },
-      tls: {
-        ciphers: 'SSLv3', // Required for Outlook
-        rejectUnauthorized: false // Useful in development environments
-      }
-    });
-  }
-  
-  // Fallback to standard SMTP
-  return nodemailer.createTransport({
-    host: config.email.host,
-    port: config.email.port,
-    secure: config.email.port === 465, // true for 465, false for other ports
-    auth: {
-      user: config.email.user,
-      pass: config.email.password
-    }
-  });
-};
-
 /**
  * Safely send an email, with error handling
- * @param {Object} mailOptions The nodemailer mail options
+ * @param {Object} mailOptions The email options
  * @returns {Promise<boolean>} Success status
  */
 const safelySendEmail = async (mailOptions) => {
-  // Skip sending if disabled
   if (!SEND_EMAILS) {
-    console.log('Email sending is disabled. Would have sent to:', mailOptions.to);
-    console.log('Email subject:', mailOptions.subject);
+    console.log('Email sending is disabled');
     return true;
   }
-  
+
   try {
-    // Try sending with Brevo API first if configured
-    if (config.email.brevoApiKey) {
-      console.log('Using Brevo API to send email...');
-      return await brevoService.sendEmail({
-        to: mailOptions.to,
-        subject: mailOptions.subject,
-        html: mailOptions.html,
-        from: mailOptions.from
-      });
-    }
-    
-    // Fallback to SMTP if Brevo API is not configured
-    // Skip if email config is not set
-    if (!config.email.host && !config.email.sendgridApiKey) {
-      console.log('Email configuration not set. Skipping email notification.');
-      return false;
-    }
-    
-    const transporter = getTransporter();
-    
-    // Verify transporter configuration before sending
-    try {
-      // Only verify if not using SendGrid
-      if (!config.email.sendgridApiKey) {
-        console.log('Verifying email connection...');
-        await transporter.verify();
-        console.log('Email server connection successful!');
-      }
-    } catch (verifyError) {
-      console.error('Email server connection failed:', verifyError);
-      console.log('Check your email configuration in .env file.');
-      return false;
-    }
-    
-    // Send the email
-    const result = await transporter.sendMail(mailOptions);
-    console.log(`Email sent to ${mailOptions.to}`);
-    console.log(`Message ID: ${result.messageId}`);
+    const { from, to, subject, html, text } = mailOptions;
+    await resend.emails.send({
+      from: from || process.env.EMAIL_FROM,
+      to,
+      subject,
+      html,
+      text
+    });
+    console.log('Email sent successfully');
     return true;
   } catch (error) {
     console.error('Error sending email:', error);
-    
-    // Provide more helpful error messages
-    if (error.code === 'EAUTH') {
-      console.error('Authentication error: Check your username and password.');
-      console.error('If using Hotmail/Outlook with 2FA, ensure you are using an app password.');
-    } else if (error.code === 'ESOCKET') {
-      console.error('Connection error: Could not connect to email server.');
-      console.error('Check your EMAIL_HOST and EMAIL_PORT settings.');
-    } else if (error.code === 'EENVELOPE') {
-      console.error('Addressing error: Check the email addresses (from/to).');
-    }
-    
     return false;
   }
 };
@@ -145,7 +40,7 @@ const safelySendEmail = async (mailOptions) => {
  * @param {Object} invoice The invoice object
  * @param {String} toEmail Override the client email if needed
  */
-exports.sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
+const sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
   try {
     
     // Format due date
@@ -168,7 +63,6 @@ exports.sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
     
     // Email content
     const mailOptions = {
-      from: config.email.from,
       to: toEmail || invoice.clientEmail,
       subject: `Invoice #${invoice.invoiceNumber} from Your Company Name`,
       html: `
@@ -231,6 +125,33 @@ exports.sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
             <p>&copy; ${new Date().getFullYear()} Your Company Name. All rights reserved.</p>
           </div>
         </div>
+      `,
+      text: `
+Invoice #${invoice.invoiceNumber}
+
+Dear ${invoice.clientName},
+
+We hope this email finds you well. Please find attached your invoice with the details below:
+
+Invoice Number: ${invoice.invoiceNumber}
+Due Date: ${dueDate}
+Total Amount: $${invoice.total.toFixed(2)}
+
+Description | Quantity | Price | Amount
+${itemsList.replace(/<tr>/g, '').replace(/<\/tr>/g, '').replace(/<td>/g, '').replace(/<\/td>/g, '')}
+
+Subtotal: $${invoice.subtotal.toFixed(2)}
+Tax: $${invoice.tax.toFixed(2)}
+Total: $${invoice.total.toFixed(2)}
+
+You can view and pay your invoice at: ${paymentUrl}
+
+If you have any questions or concerns regarding this invoice, please don't hesitate to contact us.
+
+Thank you for your business!
+
+Best regards,
+Your Company Name
       `
     };
     
@@ -246,7 +167,7 @@ exports.sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
  * Send payment confirmation email when an invoice is paid
  * @param {Object} invoice The invoice object
  */
-exports.sendPaymentConfirmationEmail = async (invoice) => {
+const sendPaymentConfirmationEmail = async (invoice) => {
   try {
     
     // Create invoice view link
@@ -258,7 +179,6 @@ exports.sendPaymentConfirmationEmail = async (invoice) => {
     
     // Email content
     const mailOptions = {
-      from: config.email.from,
       to: invoice.clientEmail,
       subject: `Payment Confirmation for Invoice #${invoice.invoiceNumber}`,
       html: `
@@ -295,6 +215,28 @@ exports.sendPaymentConfirmationEmail = async (invoice) => {
             <p>&copy; ${new Date().getFullYear()} Your Company Name. All rights reserved.</p>
           </div>
         </div>
+      `,
+      text: `
+Payment Confirmation
+
+Dear ${invoice.clientName},
+
+Thank you for your payment. This email confirms that we have received your payment for invoice #${invoice.invoiceNumber}.
+
+Invoice Number: ${invoice.invoiceNumber}
+Payment Date: ${new Date().toLocaleDateString()}
+Payment Method: ${paymentMethod}
+Amount: $${invoice.total.toFixed(2)}
+Transaction ID: ${invoice.transactionId || 'N/A'}
+
+You can view your invoice at: ${invoiceUrl}
+
+If you have any questions or concerns regarding this payment, please don't hesitate to contact us.
+
+Thank you for your business!
+
+Best regards,
+Your Company Name
       `
     };
     
@@ -310,7 +252,7 @@ exports.sendPaymentConfirmationEmail = async (invoice) => {
  * Send invoice reminder for an unpaid invoice
  * @param {Object} invoice The invoice object
  */
-exports.sendInvoiceReminderEmail = async (invoice) => {
+const sendInvoiceReminderEmail = async (invoice) => {
   try {
     
     // Format due date
@@ -324,7 +266,6 @@ exports.sendInvoiceReminderEmail = async (invoice) => {
     
     // Email content
     const mailOptions = {
-      from: config.email.from,
       to: invoice.clientEmail,
       subject: isOverdue 
         ? `OVERDUE: Invoice #${invoice.invoiceNumber} Payment Required`
@@ -367,6 +308,28 @@ exports.sendInvoiceReminderEmail = async (invoice) => {
             <p>&copy; ${new Date().getFullYear()} Your Company Name. All rights reserved.</p>
           </div>
         </div>
+      `,
+      text: `
+${isOverdue ? 'INVOICE OVERDUE' : 'PAYMENT REMINDER'}
+
+Dear ${invoice.clientName},
+
+${isOverdue 
+  ? `This is a reminder that your payment for invoice #${invoice.invoiceNumber} is overdue. The payment was due on ${dueDate}.` 
+  : `This is a friendly reminder that the payment for invoice #${invoice.invoiceNumber} is due on ${dueDate}.`}
+
+Invoice Number: ${invoice.invoiceNumber}
+Due Date: ${dueDate}
+Total Amount: $${invoice.total.toFixed(2)}
+
+You can view and pay your invoice at: ${paymentUrl}
+
+If you have already made this payment, please disregard this reminder. If you have any questions or concerns, please don't hesitate to contact us.
+
+Thank you for your prompt attention to this matter.
+
+Best regards,
+Your Company Name
       `
     };
     
@@ -376,4 +339,10 @@ exports.sendInvoiceReminderEmail = async (invoice) => {
     console.error('Error preparing reminder email:', error);
     return false;
   }
+};
+
+module.exports = {
+  sendInvoiceCreatedEmail,
+  sendPaymentConfirmationEmail,
+  sendInvoiceReminderEmail
 };

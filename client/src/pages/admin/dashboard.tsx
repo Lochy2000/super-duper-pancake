@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { NextPage } from 'next';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
@@ -13,7 +13,6 @@ import type { Invoice } from '../../services/invoiceService';
 const AdminDashboard: NextPage = () => {
   const { user, loading: authLoading } = useAuth();
   const { invoices: apiInvoices, loading: invoicesLoading, error: apiError, deleteInvoice } = useInvoices();
-  const [error, setError] = useState<string | null>(apiError);
   const router = useRouter();
   
   // Ensure invoices is always an array
@@ -22,17 +21,34 @@ const AdminDashboard: NextPage = () => {
   // Redirect if not logged in
   useEffect(() => {
     if (!authLoading && !user) {
-      router.push('/admin/login');
+      router.replace('/admin/login');
     }
   }, [user, authLoading, router]);
-  
+
+  // Show loading state
+  if (authLoading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        </div>
+      </Layout>
+    );
+  }
+
+  // If not authenticated, don't render anything while redirecting
+  if (!user) {
+    return null;
+  }
   
   const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this invoice? This action cannot be undone.')) {
       try {
         await deleteInvoice(id);
+        toast.success('Invoice deleted successfully');
       } catch (error) {
         console.error('Delete error:', error);
+        toast.error('Failed to delete invoice');
       }
     }
   };
@@ -47,146 +63,110 @@ const AdminDashboard: NextPage = () => {
         return 'bg-yellow-100 text-yellow-800';
     }
   };
-  
-  if (authLoading || invoicesLoading) {
-    return (
-      <Layout>
-        <div className="container mx-auto px-4 py-16 text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </Layout>
-    );
-  }
-  
-  if (!user) {
-    return null; // Will redirect in useEffect
-  }
-  
+
   return (
     <Layout>
       <Head>
-        <title>Admin Dashboard | Invoice System</title>
+        <title>Admin Dashboard - Invoice System</title>
       </Head>
-      
+
       <div className="container mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Invoice Dashboard</h1>
-          
-          <Link href="/admin/invoices/create" className="btn-primary">
+          <h1 className="text-2xl font-bold">Invoice Dashboard</h1>
+          <Link
+            href="/admin/invoices/create"
+            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+          >
             Create New Invoice
           </Link>
         </div>
-        
-        {error && (
-          <div className="bg-red-50 text-red-600 p-4 rounded-md mb-6">
-            {error}
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-white p-4 rounded shadow">
+            <h3 className="text-gray-500 text-sm">Total Invoices</h3>
+            <p className="text-2xl font-bold">{invoicesArray.length}</p>
           </div>
-        )}
-        
-        {/* Invoice Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="card bg-blue-50 border border-blue-100">
-            <h3 className="text-lg font-medium text-blue-700 mb-2">Total Invoices</h3>
-            <p className="text-3xl font-bold">{invoicesArray.length}</p>
-          </div>
-          
-          <div className="card bg-green-50 border border-green-100">
-            <h3 className="text-lg font-medium text-green-700 mb-2">Paid</h3>
-            <p className="text-3xl font-bold">
+          <div className="bg-white p-4 rounded shadow">
+            <h3 className="text-gray-500 text-sm">Paid</h3>
+            <p className="text-2xl font-bold text-green-600">
               {invoicesArray.filter(inv => inv.status === 'paid').length}
             </p>
           </div>
-          
-          <div className="card bg-yellow-50 border border-yellow-100">
-            <h3 className="text-lg font-medium text-yellow-700 mb-2">Unpaid</h3>
-            <p className="text-3xl font-bold">
+          <div className="bg-white p-4 rounded shadow">
+            <h3 className="text-gray-500 text-sm">Unpaid</h3>
+            <p className="text-2xl font-bold text-yellow-600">
               {invoicesArray.filter(inv => inv.status === 'unpaid').length}
             </p>
           </div>
-          
-          <div className="card bg-red-50 border border-red-100">
-            <h3 className="text-lg font-medium text-red-700 mb-2">Overdue</h3>
-            <p className="text-3xl font-bold">
+          <div className="bg-white p-4 rounded shadow">
+            <h3 className="text-gray-500 text-sm">Overdue</h3>
+            <p className="text-2xl font-bold text-red-600">
               {invoicesArray.filter(inv => inv.status === 'overdue').length}
             </p>
           </div>
         </div>
-        
-        {/* Invoices Table */}
-        <div className="card overflow-hidden">
-          <h2 className="text-xl font-bold mb-4">Recent Invoices</h2>
-          
-          {invoicesArray.length === 0 ? (
-            <div className="text-center py-6 text-gray-500">
-              No invoices found. Create your first invoice!
+
+        <div className="bg-white rounded shadow overflow-x-auto">
+          <h2 className="text-xl font-semibold p-4 border-b">Recent Invoices</h2>
+          {invoicesLoading ? (
+            <div className="p-4 text-center">Loading invoices...</div>
+          ) : invoicesArray.length === 0 ? (
+            <div className="p-4 text-center text-gray-500">
+              No invoices found. Create your first invoice.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Invoice #</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Client</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Date</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Due Date</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Amount</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Status</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoicesArray.map((invoice) => (
-                    <tr key={invoice._id} className="border-t border-gray-200 hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <Link 
-                          href={`/invoices/${invoice.invoiceNumber}`}
-                          className="text-primary-600 hover:text-primary-700 font-medium"
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-2 text-left">Invoice #</th>
+                  <th className="px-4 py-2 text-left">Client</th>
+                  <th className="px-4 py-2 text-left">Amount</th>
+                  <th className="px-4 py-2 text-left">Status</th>
+                  <th className="px-4 py-2 text-left">Due Date</th>
+                  <th className="px-4 py-2 text-left">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoicesArray.map((invoice) => (
+                  <tr key={invoice._id} className="border-t">
+                    <td className="px-4 py-2">{invoice.invoiceNumber}</td>
+                    <td className="px-4 py-2">{invoice.clientName}</td>
+                    <td className="px-4 py-2">${invoice.total.toFixed(2)}</td>
+                    <td className="px-4 py-2">
+                      <span className={`px-2 py-1 rounded-full text-sm ${getStatusBadgeClass(invoice.status)}`}>
+                        {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2">
+                      {format(new Date(invoice.dueDate), 'MMM dd, yyyy')}
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex space-x-2">
+                        <Link
+                          href={`/admin/invoices/edit/${invoice._id}`}
+                          className="text-blue-500 hover:text-blue-600"
                         >
-                          {invoice.invoiceNumber}
+                          Edit
                         </Link>
-                      </td>
-                      <td className="px-4 py-3">{invoice.clientName}</td>
-                      <td className="px-4 py-3">
-                        {invoice.createdAt ? format(new Date(invoice.createdAt), 'MMM dd, yyyy') : 'N/A'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {format(new Date(invoice.dueDate), 'MMM dd, yyyy')}
-                      </td>
-                      <td className="px-4 py-3">${invoice.total.toFixed(2)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(invoice.status)}`}>
-                          {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex space-x-2">
-                          <Link
-                            href={`/admin/invoices/edit/${invoice._id}`}
-                            className="text-blue-600 hover:text-blue-800"
-                          >
-                            Edit
-                          </Link>
-                          <button
-                            onClick={() => handleDelete(invoice._id!)}
-                            className="text-red-600 hover:text-red-800"
-                          >
-                            Delete
-                          </button>
-                          <Link
-                            href={`/invoices/${invoice.invoiceNumber}`}
-                            target="_blank"
-                            className="text-green-600 hover:text-green-800"
-                          >
-                            View
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        <button
+                          onClick={() => handleDelete(invoice._id!)}
+                          className="text-red-500 hover:text-red-600"
+                        >
+                          Delete
+                        </button>
+                        <Link
+                          href={`/invoices/${invoice.invoiceNumber}`}
+                          target="_blank"
+                          className="text-green-500 hover:text-green-600"
+                        >
+                          View
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       </div>
