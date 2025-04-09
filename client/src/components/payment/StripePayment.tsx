@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { loadStripe, Stripe } from '@stripe/stripe-js';
+import { loadStripe } from '@stripe/stripe-js';
+import type { Stripe, PaymentIntent } from '@stripe/stripe-js';
 import {
   Elements,
   PaymentElement,
@@ -20,8 +21,15 @@ const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
   ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
   : null;
 
-// New CheckoutForm component
-const CheckoutForm: React.FC<{ clientSecret: string, onPaymentSuccess: () => void }> = ({ clientSecret, onPaymentSuccess }) => {
+// Define props for CheckoutForm including invoiceId
+interface CheckoutFormProps {
+  clientSecret: string;
+  invoiceId: string; // Add invoiceId prop
+  onPaymentSuccess: () => void;
+}
+
+// Update CheckoutForm component signature
+const CheckoutForm: React.FC<CheckoutFormProps> = ({ clientSecret, invoiceId, onPaymentSuccess }) => {
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -32,41 +40,43 @@ const CheckoutForm: React.FC<{ clientSecret: string, onPaymentSuccess: () => voi
 
     if (!stripe || !elements) {
       // Stripe.js has not yet loaded.
-      // Make sure to disable form submission until Stripe.js has loaded.
       return;
     }
 
     setIsProcessing(true);
     setMessage(null);
 
-    const { error, paymentIntent } = await stripe.confirmPayment({
+    // Use result object instead of destructuring immediately
+    const result = await stripe.confirmPayment({
       elements,
       confirmParams: {
-        // Make sure to change this to your payment completion page
-        return_url: `${window.location.origin}/payment-success?invoiceId=${/* How to get invoiceId here? Need to pass it down */ ''}`, // Placeholder for invoiceId
+        return_url: `${window.location.origin}/payment-success`,
       },
-      // We redirect to the return_url for success automatically
-      // redirect: 'if_required' // Use this if you want to handle success manually without redirect
     });
 
-    if (error) {
-      // This point will only be reached if there is an immediate error when
-      // confirming the payment. Otherwise, your customer will be redirected to
-      // your `return_url`. For some payment methods like iDEAL, your customer will
-      // be redirected to an intermediate site first to authorize the payment, then
-      // redirected to the `return_url`.
-      setMessage(error.message || 'An unexpected error occurred.');
-      toast.error(error.message || 'Payment failed.');
-    } else if (paymentIntent && paymentIntent.status === 'succeeded') {
-       // This block is usually not reached because of the redirect
-       // If using redirect: 'if_required', handle success here
-       setMessage('Payment succeeded!');
-       toast.success('Payment successful!');
-       onPaymentSuccess(); // Notify parent component
+    // Check for error first
+    if (result.error) {
+      setMessage(result.error.message || 'An unexpected error occurred.');
+      toast.error(result.error.message || 'Payment failed.');
+      setIsProcessing(false); // Stop processing on error
+    } else {
+      // If no error, use 'in' operator and type assertion to safely access paymentIntent.status
+      if ('paymentIntent' in result && result.paymentIntent) {
+        // Assert the type of paymentIntent to access its properties
+        const paymentIntent = result.paymentIntent as PaymentIntent;
+        if (paymentIntent.status === 'succeeded') {
+          // This block is usually only reached if redirect: 'if_required' is used,
+          // as the browser typically redirects before this code runs.
+          setMessage('Payment succeeded!');
+          toast.success('Payment successful!');
+          onPaymentSuccess();
+        }
+      }
+      // No need to setIsProcessing(false) here if redirecting, but include for completeness
+      setIsProcessing(false);
     }
 
-
-    setIsProcessing(false);
+    //setIsProcessing(false); // Moved inside the if/else blocks
   };
 
   return (
@@ -77,12 +87,10 @@ const CheckoutForm: React.FC<{ clientSecret: string, onPaymentSuccess: () => voi
           {isProcessing ? "Processing…" : "Pay now"}
         </span>
       </button>
-      {/* Show any error or success messages */}
       {message && <div id="payment-message" className="text-red-600 mt-2">{message}</div>}
     </form>
   );
 };
-
 
 const StripePayment: React.FC<StripePaymentProps> = ({ invoiceId, amount, onPaymentSuccess }) => {
   const [loadingIntent, setLoadingIntent] = useState(false);
@@ -173,7 +181,8 @@ const StripePayment: React.FC<StripePaymentProps> = ({ invoiceId, amount, onPaym
 
       {clientSecret && options && (
         <Elements options={options} stripe={stripePromise}>
-          <CheckoutForm clientSecret={clientSecret} onPaymentSuccess={onPaymentSuccess} />
+          {/* Pass invoiceId down to CheckoutForm */}
+          <CheckoutForm clientSecret={clientSecret} invoiceId={invoiceId} onPaymentSuccess={onPaymentSuccess} />
         </Elements>
       )}
     </div>

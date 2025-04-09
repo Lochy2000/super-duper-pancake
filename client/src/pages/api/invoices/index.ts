@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createClient } from '@supabase/supabase-js';
+import { Resend } from 'resend';
 
 // Initialize Supabase client with service role key for server operations
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -18,6 +19,14 @@ const supabase = createClient(
     }
   }
 );
+
+// Initialize Resend
+const resendApiKey = process.env.RESEND_API_KEY;
+if (!resendApiKey) {
+  console.error('CRITICAL: Missing RESEND_API_KEY environment variable.');
+  // Decide if you want to throw an error or log and continue without email sending
+}
+const resend = new Resend(resendApiKey);
 
 // Helper to transform Supabase invoice data to the client-expected format
 const transformInvoiceData = (invoice: any) => {
@@ -218,6 +227,59 @@ export default async function handler(
 
       // Transform the returned data to client format
       const transformedData = transformInvoiceData(data);
+
+      // ---- START: Send Invoice Creation Email ----
+      if (resendApiKey) {
+        // Use the client email and name directly from the input data
+        const clientEmailToSend = invoiceData.clientEmail;
+        const clientNameToSend = invoiceData.clientName;
+        const invoiceNumberToSend = data.invoice_number; // Get invoice number from DB result
+        const totalToSend = data.amount; // Get total from DB result
+        const dueDateToSend = data.due_date; // Get due date from DB result
+        
+        if (clientEmailToSend) { // Ensure we have an email to send to
+          try {
+            const viewInvoiceUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/invoices/${invoiceNumberToSend}`;
+            await resend.emails.send({
+              from: 'Invoice System <noreply@easywebs.uk>', 
+              to: [clientEmailToSend],
+              subject: `New Invoice Created: ${invoiceNumberToSend}`,
+              html: `
+                <h1>New Invoice #${invoiceNumberToSend}</h1>
+                <p>Hello ${clientNameToSend || 'Client'},</p> 
+                <p>A new invoice for $${totalToSend.toFixed(2)} has been created for you.</p>
+                <p>Due Date: ${new Date(dueDateToSend).toLocaleDateString()}</p>
+                <p>You can view and pay the invoice here: <a href="${viewInvoiceUrl}">View Invoice</a></p>
+                <p>Thank you!</p>
+              `,
+              // Add plain text version for deliverability
+              text: 
+`New Invoice #${invoiceNumberToSend}
+
+Hello ${clientNameToSend || 'Client'},
+
+A new invoice for $${totalToSend.toFixed(2)} has been created for you.
+
+Due Date: ${new Date(dueDateToSend).toLocaleDateString()}
+
+View and pay the invoice here: ${viewInvoiceUrl}
+
+Thank you!`
+            });
+            console.log(`✉️ Invoice creation email sent successfully to ${clientEmailToSend}`);
+          } catch (emailError) {
+            console.error('❌ Error sending invoice creation email via Resend:', emailError);
+            // Decide how to handle email errors - log, return specific error, etc.
+            // Don't fail the API request just because the email failed.
+          }
+        } else {
+          console.warn('⚠️ Client email was missing in the request data. Skipping invoice creation email.');
+        }
+      } else {
+         console.warn('⚠️ Resend API key not configured. Skipping invoice creation email.');
+      }
+      // ---- END: Send Invoice Creation Email ----
+
       return res.status(201).json(transformedData);
     }
   } catch (error: any) {

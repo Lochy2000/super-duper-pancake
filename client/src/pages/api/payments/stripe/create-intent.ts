@@ -8,7 +8,7 @@ if (!stripeSecretKey) {
   console.error('Missing Stripe Secret Key');
 }
 const stripe = new Stripe(stripeSecretKey || '', {
-  apiVersion: '2023-10-16', // Use the latest version or a specific version
+  apiVersion: '2025-02-24.acacia', // Match webhook handler API version
 });
 
 // Initialize Supabase client with service role key for server operations
@@ -29,7 +29,8 @@ const supabase = createClient(
   }
 );
 
-// Get user ID from request
+// Get user ID from request - REMOVING THIS FOR NOW TO SIMPLIFY CLIENT PAYMENT
+/*
 const getUserId = async (req: NextApiRequest) => {
   // Extract JWT from authorization header
   const authHeader = req.headers.authorization;
@@ -53,6 +54,7 @@ const getUserId = async (req: NextApiRequest) => {
     throw new Error('Authentication failed');
   }
 };
+*/
 
 export default async function handler(
   req: NextApiRequest,
@@ -70,55 +72,64 @@ export default async function handler(
       return res.status(400).json({ error: 'Invoice ID is required' });
     }
 
-    // Get authenticated user ID
+    // Fetch the invoice directly by ID without user auth check for this test
+    console.log(`[create-intent] Fetching invoice for ID: ${invoiceId}`);
+    const { data: invoice, error: invoiceError } = await supabase
+      .from('invoices')
+      // Select necessary fields + user_id for metadata
+      .select('id, user_id, amount, currency, invoice_number, status') 
+      .eq('id', invoiceId)
+      .single();
+
+    if (invoiceError) {
+      if (invoiceError.code === 'PGRST116') { // Record not found
+        console.error(`[create-intent] Invoice not found: ${invoiceId}`);
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+      console.error('[create-intent] Error fetching invoice:', invoiceError);
+      return res.status(500).json({ error: 'Failed to fetch invoice details' });
+    }
+    console.log(`[create-intent] Found invoice: ${invoice.invoice_number}, Status: ${invoice.status}`);
+
+    // REMOVED: Verify the invoice belongs to the authenticated user
+    /*
     let userId;
     try {
       userId = await getUserId(req);
     } catch (error: any) {
       return res.status(401).json({ error: error.message || 'Authentication failed' });
     }
-
-    // Fetch the invoice to get the amount and check ownership
-    const { data: invoice, error: invoiceError } = await supabase
-      .from('invoices')
-      .select('id, user_id, amount, currency, invoice_number, status')
-      .eq('id', invoiceId)
-      .single();
-
-    if (invoiceError) {
-      if (invoiceError.code === 'PGRST116') { // Record not found
-        return res.status(404).json({ error: 'Invoice not found' });
-      }
-      console.error('Error fetching invoice:', invoiceError);
-      return res.status(500).json({ error: 'Failed to fetch invoice details' });
-    }
-
-    // Verify the invoice belongs to the authenticated user
     if (invoice.user_id !== userId) {
       return res.status(403).json({ error: 'Not authorized to access this invoice' });
     }
+    */
+    const userIdForMetadata = invoice.user_id; // Get user_id from the fetched invoice for metadata
 
     // Don't allow payment if already paid
     if (invoice.status === 'paid') {
+      console.warn(`[create-intent] Attempt to pay already paid invoice: ${invoiceId}`);
       return res.status(400).json({ error: 'Invoice is already paid' });
     }
 
     // Convert amount to smallest currency unit (cents for USD, etc.)
-    // Stripe requires amounts in cents
     const amount = Math.round(parseFloat(invoice.amount) * 100);
+    console.log(`[create-intent] Amount in cents: ${amount}`);
 
     // Create a payment intent with Stripe
+    console.log(`[create-intent] Creating Stripe Payment Intent with metadata including invoiceId: ${invoice.id}`);
     const paymentIntent = await stripe.paymentIntents.create({
       amount,
       currency: invoice.currency || 'usd',
       metadata: {
-        invoiceId: invoice.id,
+        invoiceId: invoice.id, // Crucial for webhook
         invoiceNumber: invoice.invoice_number,
-        userId
+        userId: userIdForMetadata // Include original user ID if needed
       }
     });
+    console.log(`[create-intent] Payment Intent created: ${paymentIntent.id}`);
 
     // Create a record in the payments table
+    console.log(`[create-intent] Creating pending payment record for PI: ${paymentIntent.id}`);
     const { data: payment, error: paymentError } = await supabase
       .from('payments')
       .insert([{
@@ -135,11 +146,14 @@ export default async function handler(
       .single();
 
     if (paymentError) {
-      console.error('Error creating payment record:', paymentError);
-      // Still continue since the Stripe payment intent was created
+      console.error('[create-intent] Error creating payment record:', paymentError);
+      // Decide if this should be a fatal error
+    } else {
+      console.log(`[create-intent] Pending payment record created: ${payment?.id}`);
     }
 
     // Return the payment intent details to the client
+    console.log(`[create-intent] Returning clientSecret to frontend.`);
     return res.status(200).json({
       id: paymentIntent.id,
       clientSecret: paymentIntent.client_secret,
@@ -147,7 +161,7 @@ export default async function handler(
       status: paymentIntent.status
     });
   } catch (error: any) {
-    console.error('API route error:', error);
+    console.error('[create-intent] General Error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 } 
