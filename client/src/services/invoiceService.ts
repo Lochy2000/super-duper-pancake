@@ -16,7 +16,7 @@ export interface Invoice {
   subtotal: number;
   tax: number;
   total: number;
-  status: string;
+  status: 'paid' | 'unpaid' | 'overdue';
   dueDate: string;
   createdAt: string;
   updatedAt: string;

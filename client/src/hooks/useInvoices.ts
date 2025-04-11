@@ -18,8 +18,8 @@ export interface Invoice {
   total: number;
   status: 'paid' | 'unpaid' | 'overdue';
   dueDate: string;
-  createdAt?: string;
-  updatedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export function useInvoices() {
