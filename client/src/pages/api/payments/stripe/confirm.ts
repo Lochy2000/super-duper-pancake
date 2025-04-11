@@ -8,7 +8,7 @@ if (!stripeSecretKey) {
   console.error('Missing Stripe Secret Key');
 }
 const stripe = new Stripe(stripeSecretKey || '', {
-  apiVersion: '2023-10-16', // Use the latest version or a specific version
+  apiVersion: '2025-02-24.acacia', // Use the latest version
 });
 
 // Initialize Supabase client with service role key for server operations

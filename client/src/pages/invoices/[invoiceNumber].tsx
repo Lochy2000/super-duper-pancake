@@ -9,7 +9,6 @@ import Layout from '../../components/layout/Layout';
 import { getInvoiceByNumber } from '../../services/invoiceService';
 import { getPaymentMethods } from '../../services/paymentService';
 import StripePayment from '../../components/payment/StripePayment';
-import PayPalPayment from '../../components/payment/PayPalPayment';
 import { formatSafeDate } from '../../utils/dateUtils';
 
 const InvoiceDetail: NextPage = () => {
