@@ -60,7 +60,7 @@ export const getCurrentUser = async () => {
 
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('id, email, name, company_name')
+    .select('id, email, name, role')
     .eq('id', session.user.id)
     .single();
 
@@ -69,7 +69,7 @@ export const getCurrentUser = async () => {
     return {
       id: session.user.id,
       email: session.user.email!,
-      role: 'user',
+      role: 'user' as const,
       name: null
     };
   }
@@ -77,7 +77,7 @@ export const getCurrentUser = async () => {
   return {
     id: session.user.id,
     email: profile.email || session.user.email!,
-    role: 'user',
+    role: (profile.role as 'admin' | 'user') || 'user',
     name: profile.name
   };
 };
