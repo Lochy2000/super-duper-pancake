@@ -7,7 +7,7 @@ import Layout from '../../../../components/layout/Layout';
 import InvoiceForm from '../../../../components/invoices/InvoiceForm';
 import { useAuth } from '../../../../hooks/useAuth';
 import { useInvoices } from '../../../../hooks/useInvoices';
-import { getInvoiceById } from '../../../../services/invoiceService';
+import { getInvoice } from '../../../../services/invoiceService';
 import { Invoice } from '../../../../services/invoiceService';
 
 const EditInvoice: NextPage = () => {
@@ -33,7 +33,7 @@ const EditInvoice: NextPage = () => {
       
       try {
         setLoading(true);
-        const response = await getInvoiceById(id as string);
+        const response = await getInvoice(id as string);
         setInvoice(response.data);
       } catch (error) {
         console.error('Error fetching invoice:', error);

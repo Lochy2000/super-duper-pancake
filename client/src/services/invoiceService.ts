@@ -67,3 +67,8 @@ export const markInvoiceAsPaid = (id: string) => {
 export const sendInvoiceEmail = (id: string, email: string) => {
   return api.post(`/api/invoices/${id}/send`, { email });
 };
+
+// Get invoice by invoice number (public access)
+export const getInvoiceByNumber = (invoiceNumber: string) => {
+  return api.get<Invoice>(`/api/invoices/public/${invoiceNumber}`);
+};

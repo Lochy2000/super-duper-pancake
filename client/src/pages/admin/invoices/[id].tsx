@@ -4,7 +4,7 @@ import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { useAuth } from '../../../hooks/useAuth';
 import Layout from '../../../components/layout/Layout';
-import { getInvoiceById } from '../../../services/invoiceService';
+import { getInvoice } from '../../../services/invoiceService';
 
 // This is a redirect page to handle the case when admin clicks on an invoice in the dashboard
 const AdminInvoiceDetail: NextPage = () => {
@@ -24,7 +24,7 @@ const AdminInvoiceDetail: NextPage = () => {
       if (!id) return;
       
       try {
-        const response = await getInvoiceById(id as string);
+        const response = await getInvoice(id as string);
         const invoice = response.data;
         
         // Redirect to the public invoice page using the invoice number

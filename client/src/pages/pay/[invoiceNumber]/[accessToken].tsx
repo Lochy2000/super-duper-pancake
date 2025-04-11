@@ -33,12 +33,8 @@ const SecurePaymentPage: NextPage = () => {
       if (!router.isReady || !invoiceNumber || !accessToken) return;
 
       try {
-        const response = await fetch(`/api/invoices/public/${invoiceNumber}/${accessToken}`);
-        if (!response.ok) {
-          throw new Error('Failed to fetch invoice');
-        }
-        const data = await response.json();
-        setInvoice(data);
+        const response = await getInvoiceForPayment(invoiceNumber as string, accessToken as string);
+        setInvoice(response.data);
         setIsValidAccess(true);
 
         // Create payment intent
@@ -48,27 +44,35 @@ const SecurePaymentPage: NextPage = () => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            invoiceNumber: data.invoiceNumber,
-            amount: data.total,
-            accessToken: accessToken,
-          }),
+            amount: response.data.total,
+            currency: 'usd',
+            invoiceId: response.data._id
+          })
         });
-
+        
         if (!paymentResponse.ok) {
           throw new Error('Failed to create payment intent');
         }
-
-        const { clientSecret } = await paymentResponse.json();
-        setClientSecret(clientSecret);
-      } catch (err) {
-        console.error('Error:', err);
-        setIsValidAccess(false);
+        
+        const paymentData = await paymentResponse.json();
+        setClientSecret(paymentData.clientSecret);
+        
+        // Load available payment methods
+        const methodsResponse = await getPaymentMethods();
+        setAvailablePaymentMethods(methodsResponse.data);
+        
+        if (methodsResponse.data.length > 0) {
+          setSelectedPaymentMethod(methodsResponse.data[0].id);
+        }
+      } catch (error) {
+        console.error('Error fetching invoice:', error);
         setError('Invalid or expired access token');
+        setIsValidAccess(false);
       }
     };
-
+    
     fetchInvoice();
-  }, [invoiceNumber, accessToken, router.isReady]);
+  }, [router.isReady, invoiceNumber, accessToken]);
 
   // Handle successful payment
   const handlePaymentSuccess = async () => {
@@ -76,11 +80,8 @@ const SecurePaymentPage: NextPage = () => {
     // Refresh the invoice data to show updated status
     if (invoiceNumber && accessToken) {
       try {
-        const response = await fetch(`/api/invoices/public/${invoiceNumber}/${accessToken}`);
-        if (response.ok) {
-          const updatedInvoice = await response.json();
-          setInvoice(updatedInvoice);
-        }
+        const response = await getInvoiceForPayment(invoiceNumber as string, accessToken as string);
+        setInvoice(response.data);
       } catch (err) {
         console.error('Error refreshing invoice:', err);
       }
