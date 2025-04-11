@@ -1,16 +1,18 @@
 import api from './api';
 
+export interface InvoiceItem {
+  description: string;
+  quantity: number;
+  price: number;
+}
+
 export interface Invoice {
   _id: string;
   invoiceNumber: string;
   clientId: string;
   clientName: string;
   clientEmail: string;
-  items: Array<{
-    description: string;
-    quantity: number;
-    price: number;
-  }>;
+  items: InvoiceItem[];
   subtotal: number;
   tax: number;
   total: number;
