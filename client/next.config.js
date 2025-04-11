@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  basePath: '/invoices',
+  basePath: process.env.NODE_ENV === 'production' ? '/invoices' : '',
   async rewrites() {
     return {
       beforeFiles: [

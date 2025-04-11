@@ -58,8 +58,11 @@ const PaymentSuccess = () => {
   }, []);
 
   return (
-    <div className="min-h-screen grid-background text-white">
-      <div className="grid-cursor" ref={cursorRef}></div>
+    <div className="min-h-screen grid-background text-white relative overflow-hidden">
+      {/* Background overlay */}
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-purple-900/5 to-transparent" />
+      <div className="grid-cursor" ref={cursorRef} />
+      
       <Head>
         <title>Payment Successful | Easy Web</title>
         <meta name="description" content="Payment successfully processed" />
@@ -67,19 +70,21 @@ const PaymentSuccess = () => {
       </Head>
 
       <Layout>
-        <div className="container mx-auto px-4 py-16">
+        <div className="container mx-auto px-4 py-16 relative z-10">
           {/* Success Message */}
           <div className="text-center mb-16">
             <div className="flex justify-center mb-8">
-              <div className="m2">
-                <CheckCircleIcon className="h-8 w-8 text-purple-500" />
+              <div className="rounded-full bg-purple-500/20 p-4 backdrop-blur-sm">
+                <CheckCircleIcon className="h-16 w-16 text-purple-400" />
               </div>
             </div>
-            <h1 className="text-4xl font-bold text-white mb-4">Thank You!</h1>
-            <p className="text-xl text-gray-300 max-w-2xl mx-auto mb-2">
+            <h1 className="text-5xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-purple-600">
+              Thank You!
+            </h1>
+            <p className="text-xl text-gray-300 max-w-2xl mx-auto mb-4">
               Your payment has been processed successfully.
             </p>
-            <p className="text-gray-400">
+            <p className="text-gray-400 text-lg">
               A confirmation email has been sent to your inbox.
             </p>
           </div>
@@ -87,18 +92,21 @@ const PaymentSuccess = () => {
           {/* Services Section */}
           <div className="max-w-6xl mx-auto">
             <div className="text-center mb-12">
-              <h2 className="text-3xl font-bold text-white mb-4">
+              <h2 className="text-3xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-purple-600">
                 Discover More Services from Easy Web
               </h2>
-              <p className="text-gray-300 max-w-2xl mx-auto">
+              <p className="text-gray-300 max-w-2xl mx-auto text-lg">
                 Take your online presence to the next level with our comprehensive web solutions
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {services.map((service, index) => (
-                <div key={index} className="service-card">
-                  <h3 className="text-xl font-semibold text-white mb-3">
+                <div 
+                  key={index} 
+                  className="rounded-xl bg-gray-900/50 backdrop-blur-sm p-6 border border-gray-800 hover:border-purple-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/10"
+                >
+                  <h3 className="text-xl font-semibold mb-3 bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-purple-600">
                     {service.title}
                   </h3>
                   <p className="text-gray-300">
@@ -109,14 +117,16 @@ const PaymentSuccess = () => {
             </div>
 
             {/* Contact Section */}
-            <div className="text-center mt-12">
-              <h3 className="text-2xl font-bold text-white mb-4">Need Help?</h3>
-              <p className="text-gray-300 mb-6">
+            <div className="text-center mt-16">
+              <h3 className="text-2xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-purple-600">
+                Need Help?
+              </h3>
+              <p className="text-gray-300 mb-6 text-lg">
                 Our team is here to assist you with any questions or concerns.
               </p>
               <a
                 href="mailto:info@easywebs.uk"
-                className="inline-block bg-purple-600 text-white px-6 py-3 rounded-md hover:bg-purple-700 transition-colors"
+                className="inline-block bg-gradient-to-r from-purple-600 to-purple-700 text-white px-8 py-4 rounded-lg hover:from-purple-700 hover:to-purple-800 transition-all duration-300 shadow-lg hover:shadow-purple-500/25 font-semibold backdrop-blur-sm"
               >
                 Contact Support
               </a>
