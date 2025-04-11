@@ -1,28 +1,26 @@
 {
-  "name": "invoice-pages",
+  "name": "invoice-app",
   "version": "1.0.0",
-  "description": "Invoicing application with payment integration",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
-    "start": "cd server && npm start",
-    "build:server": "cd server && npm install",
-    "build:client": "cd client && npm install && npm run build",
-    "dev:server": "cd server && npm run dev",
-    "dev:client": "cd client && npm run dev",
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "heroku-postbuild": "cd server && npm install"
+    "dev": "npm run dev --workspace=client",
+    "build": "npm run build --workspace=client",
+    "start": "npm run start --workspace=client"
+  },
+  "dependencies": {
+    "next": "^14.2.15",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.15"
   },
   "engines": {
     "node": ">=16.0.0"
-  },
-  "cacheDirectories": [
-    "client/node_modules",
-    "server/node_modules"
-  ],
-  "devDependencies": {
-    "concurrently": "^8.0.1"
-  },
-  "dependencies": {
-    "@paypal/checkout-server-sdk": "^1.0.3",
-    "stripe": "^17.7.0"
   }
 }
