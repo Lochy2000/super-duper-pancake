@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
+import crypto from 'crypto';
 
 // Initialize Supabase client with service role key for server operations
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -62,8 +63,10 @@ const transformForSupabase = (invoiceData: any) => {
     notes: invoiceData.notes,
     // Tax info
     tax_rate: (invoiceData.tax && invoiceData.subtotal) ? 
-      (invoiceData.tax / invoiceData.subtotal) * 100 : 0
-    // client_name and client_email are now stored in the clients table, not in invoices
+      (invoiceData.tax / invoiceData.subtotal) * 100 : 0,
+    // Access token fields
+    access_token: invoiceData.accessToken,
+    token_expires_at: invoiceData.tokenExpiresAt
   };
 };
 
@@ -164,6 +167,11 @@ export default async function handler(
         return res.status(400).json({ error: 'Client name and email are required' });
       }
       
+      // Generate access token and set expiration (7 days from now)
+      const accessToken = crypto.randomBytes(32).toString('hex');
+      const tokenExpiresAt = new Date();
+      tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 7);
+      
       // Step 1: Look for an existing client with this email for this user
       const { data: existingClient, error: clientLookupError } = await supabase
         .from('clients')
@@ -204,11 +212,13 @@ export default async function handler(
         clientId = newClient.id;
       }
       
-      // Now prepare the invoice data with the client ID
+      // Now prepare the invoice data with the client ID and access token
       const supabaseData = {
         ...transformForSupabase(invoiceData),
-        client_id: clientId, // Use the client ID we looked up or created
+        client_id: clientId,
         user_id: userId,
+        access_token: accessToken,
+        token_expires_at: tokenExpiresAt.toISOString(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -233,17 +243,17 @@ export default async function handler(
         // Use the client email and name directly from the input data
         const clientEmailToSend = invoiceData.clientEmail;
         const clientNameToSend = invoiceData.clientName;
-        const invoiceNumberToSend = data.invoice_number; // Get invoice number from DB result
-        const totalToSend = data.amount; // Get total from DB result
-        const dueDateToSend = data.due_date; // Get due date from DB result
+        const invoiceNumberToSend = data.invoice_number;
+        const totalToSend = data.amount;
+        const dueDateToSend = data.due_date;
         
-        if (clientEmailToSend) { // Ensure we have an email to send to
+        if (clientEmailToSend) {
           try {
-            const viewInvoiceUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/invoices/${invoiceNumberToSend}`;
+            const viewInvoiceUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/pay/${invoiceNumberToSend}/${accessToken}`;
             await resend.emails.send({
               from: 'Invoice System <noreply@easywebs.uk>', 
               to: [clientEmailToSend],
-              subject: `New Invoice Created: ${invoiceNumberToSend}`,
+              subject: `New Invoice #${invoiceNumberToSend}`,
               html: `
                 <h1>New Invoice #${invoiceNumberToSend}</h1>
                 <p>Hello ${clientNameToSend || 'Client'},</p> 
@@ -252,7 +262,6 @@ export default async function handler(
                 <p>You can view and pay the invoice here: <a href="${viewInvoiceUrl}">View Invoice</a></p>
                 <p>Thank you!</p>
               `,
-              // Add plain text version for deliverability
               text: 
 `New Invoice #${invoiceNumberToSend}
 
@@ -269,8 +278,6 @@ Thank you!`
             console.log(`✉️ Invoice creation email sent successfully to ${clientEmailToSend}`);
           } catch (emailError) {
             console.error('❌ Error sending invoice creation email via Resend:', emailError);
-            // Decide how to handle email errors - log, return specific error, etc.
-            // Don't fail the API request just because the email failed.
           }
         } else {
           console.warn('⚠️ Client email was missing in the request data. Skipping invoice creation email.');

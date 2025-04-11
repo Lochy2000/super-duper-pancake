@@ -1,65 +1,67 @@
 import api from './api';
 
-export interface InvoiceItem {
-  description: string;
-  quantity: number;
-  price: number;
-}
-
 export interface Invoice {
-  _id?: string;
+  _id: string;
   invoiceNumber: string;
   clientId: string;
-  clientName?: string;
-  clientEmail?: string;
-  items: InvoiceItem[];
+  clientName: string;
+  clientEmail: string;
+  items: Array<{
+    description: string;
+    quantity: number;
+    price: number;
+  }>;
   subtotal: number;
   tax: number;
   total: number;
-  status: 'unpaid' | 'paid' | 'overdue';
+  status: string;
   dueDate: string;
-  createdAt?: string;
-  updatedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
-// Get all invoices
+// Get all invoices (admin only)
 export const getInvoices = () => {
   return api.get<Invoice[]>('/api/invoices');
 };
 
-// Get single invoice by ID
-export const getInvoiceById = (id: string) => {
+// Get single invoice by ID (admin only)
+export const getInvoice = (id: string) => {
   return api.get<Invoice>(`/api/invoices/${id}`);
 };
 
-// Get invoice by invoice number (for public/client access)
-export const getInvoiceByNumber = (invoiceNumber: string) => {
-  return api.get<Invoice>(`/api/portal/invoice`, {
-    params: { number: invoiceNumber }
-  });
+// Get invoice by invoice number and access token (secure public access)
+export const getInvoiceForPayment = (invoiceNumber: string, accessToken: string) => {
+  return api.get<Invoice>(`/api/invoices/public/${invoiceNumber}/${accessToken}`);
 };
 
-// Create new invoice
-export const createInvoice = (invoiceData: Omit<Invoice, '_id'>) => {
-  return api.post<Invoice>('/api/invoices', invoiceData);
+// Get invoices for the logged-in client (Client Portal)
+export const getClientPortalInvoices = (status?: string) => {
+  const params = status ? { status } : {};
+  return api.get<Invoice[]>('/api/client/invoices', { params });
 };
 
-// Update invoice
-export const updateInvoice = (id: string, invoiceData: Partial<Invoice>) => {
-  return api.put<Invoice>(`/api/invoices/${id}`, invoiceData);
+// Create new invoice (admin only)
+export const createInvoice = (data: Partial<Invoice>) => {
+  return api.post<Invoice>('/api/invoices', data);
 };
 
-// Delete invoice
+// Update invoice (admin only)
+export const updateInvoice = (id: string, data: Partial<Invoice>) => {
+  return api.put<Invoice>(`/api/invoices/${id}`, data);
+};
+
+// Delete invoice (admin only)
 export const deleteInvoice = (id: string) => {
   return api.delete(`/api/invoices/${id}`);
 };
 
-// Mark invoice as paid
+// Mark invoice as paid (admin only)
 export const markInvoiceAsPaid = (id: string) => {
   return api.put<Invoice>(`/api/invoices/${id}/pay`, {});
 };
 
-// Send invoice email
+// Send invoice email (admin only)
 export const sendInvoiceEmail = (id: string, email: string) => {
   return api.post(`/api/invoices/${id}/send`, { email });
 };

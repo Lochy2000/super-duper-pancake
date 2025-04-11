@@ -11,6 +11,7 @@
     "dev:clean": "npm run clean && npm run dev"
   },
   "dependencies": {
+    "@heroicons/react": "^2.2.0",
     "@paypal/react-paypal-js": "^8.0.0",
     "@stripe/react-stripe-js": "^3.5.1",
     "@stripe/stripe-js": "^1.54.2",

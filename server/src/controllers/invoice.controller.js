@@ -1,6 +1,8 @@
 const Invoice = require('../models/invoice.model');
 const { ApiError } = require('../middleware/errorHandler');
 const emailService = require('../services/email.service');
+const { supabase } = require('../services/database.service');
+const crypto = require('crypto');
 
 /**
  * @desc    Get all invoices
@@ -57,23 +59,48 @@ exports.getInvoice = async (req, res, next) => {
 };
 
 /**
- * @desc    Get invoice by invoice number (public access for client viewing)
- * @route   GET /api/invoices/public/:invoiceNumber
+ * @desc    Get invoice by invoice number and access token (public access for client viewing/payment)
+ * @route   GET /api/invoices/public/:invoiceNumber/:accessToken
  * @access  Public
  */
 exports.getInvoiceByNumber = async (req, res, next) => {
   try {
-    const invoice = await Invoice.findByNumber(req.params.invoiceNumber);
-    
-    if (!invoice) {
-      throw new ApiError('Invoice not found', 404);
+    const { invoiceNumber, accessToken } = req.params;
+
+    if (!accessToken) {
+      // This check might be redundant if the route enforces the accessToken param
+      throw new ApiError('Access token is required', 400);
     }
+
+    // Pass both invoiceNumber and accessToken to the model function
+    const invoice = await Invoice.findByNumber(invoiceNumber, accessToken);
+
+    if (!invoice) {
+      // The model now throws specific errors for not found vs invalid token
+      // Let the model's error propagate, or re-wrap if needed.
+      // For consistency, we can let the global error handler catch it.
+      // Alternatively, re-throw with ApiError:
+      throw new ApiError('Invoice not found or access denied', 404); // Keep generic for security
+    }
+
+    // Remove sensitive data before sending to client if necessary
+    // e.g., delete invoice.access_token;
+    // delete invoice.token_expires_at;
 
     res.status(200).json({
       success: true,
       data: invoice
     });
   } catch (error) {
+    // Catch specific errors from the model if needed
+    if (error.message === 'Invalid or expired access token.') {
+      return next(new ApiError(error.message, 401)); // Unauthorized
+    } else if (error.message === 'Invoice not found.') {
+      return next(new ApiError(error.message, 404)); // Not Found
+    } else if (error.message === 'Access token is required to view this invoice.') {
+       return next(new ApiError(error.message, 400)); // Bad Request
+    }
+    // Pass other errors to the global handler
     next(error);
   }
 };
@@ -81,35 +108,109 @@ exports.getInvoiceByNumber = async (req, res, next) => {
 /**
  * @desc    Create new invoice
  * @route   POST /api/invoices
- * @access  Private
+ * @access  Private (Admin)
  */
 exports.createInvoice = async (req, res, next) => {
   try {
-    const { clientId, items, dueDate, notes } = req.body;
+    // Use clientEmail and clientName from request body
+    const { clientId, clientEmail, clientName, items, dueDate, notes } = req.body; 
+
+    if (!clientEmail || !items || !dueDate) {
+      throw new ApiError('Missing required fields: clientEmail, items, dueDate', 400);
+    }
+
+    // --- Client User Handling (Re-introduced) ---
+    let clientAuthId = null;
+    let temporaryPassword = null;
+    let clientExists = false;
+
+    // 1. Check if user exists by email
+    const { data: existingUser, error: findError } = await supabase.auth.admin.getUserByEmail(clientEmail);
+
+    if (findError && findError.status !== 404) {
+      console.error('Supabase getUser Error:', findError);
+      throw new ApiError('Error checking client account.', 500);
+    }
+
+    if (existingUser && existingUser.user) {
+      clientAuthId = existingUser.user.id;
+      clientExists = true;
+      console.log(`Client user found: ${clientAuthId}`);
+    } else {
+      // 2. User doesn't exist, create one
+      temporaryPassword = crypto.randomBytes(8).toString('hex'); 
+      console.log(`Creating new client user: ${clientEmail}, Temp Pass: ${temporaryPassword}`);
+
+      const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
+        email: clientEmail,
+        password: temporaryPassword,
+        email_confirm: true, 
+        user_metadata: { full_name: clientName || clientEmail }
+      });
+
+      if (createError) {
+        console.error('Supabase createUser Error:', createError);
+        throw new ApiError(`Failed to create client account: ${createError.message}`, 500);
+      }
+      
+      if (!newUser || !newUser.user) {
+         throw new ApiError('Failed to create client user, received null user.', 500);
+      }
+
+      clientAuthId = newUser.user.id;
+      console.log(`New client user created: ${clientAuthId}`);
+      
+      // Create corresponding entry in 'profiles' table
+      const { error: profileError } = await supabase
+        .from('profiles') 
+        .insert({
+           id: clientAuthId, 
+           email: clientEmail, 
+           full_name: clientName || clientEmail, 
+           role: 'client' // Assign 'client' role
+         });
+
+      if (profileError) {
+          console.error("Error creating client profile:", profileError);
+          // Non-critical? Maybe just log it.
+      }
+    }
+    // --- End Client User Handling ---
 
     // Calculate totals
     const { subtotal, tax, total } = await Invoice.calculateTotals(items);
 
-    // Create invoice
-    const invoice = await Invoice.create({
-      user_id: req.user.id,
-      client_id: clientId,
+    // Generate access token and set expiration (7 days from now)
+    const accessToken = crypto.randomBytes(32).toString('hex');
+    const tokenExpiresAt = new Date();
+    tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 7); // 7 days from now
+
+    // Create invoice data object
+    const invoiceData = {
+      user_id: req.user.id,       // Admin User ID
+      client_id: clientId,        // Original client ID from clients table (if still used)
+      client_auth_id: clientAuthId, // Store the client's Supabase Auth ID
+      client_email: clientEmail,   
+      client_name: clientName,     
       due_date: dueDate,
       notes,
       subtotal,
       tax,
-      total
-    });
+      total,
+      status: 'pending',
+      access_token: accessToken,
+      token_expires_at: tokenExpiresAt.toISOString()
+    };
 
-    // Add items
-    await Invoice.addItems(invoice.id, items);
+    // Create the invoice
+    const invoice = await Invoice.create(invoiceData);
 
-    // Get complete invoice with items
-    const completeInvoice = await Invoice.findById(invoice.id);
+    // Send email to client
+    await emailService.sendInvoiceCreatedEmail(invoice, temporaryPassword, clientExists);
 
     res.status(201).json({
       success: true,
-      data: completeInvoice
+      data: invoice
     });
   } catch (error) {
     next(error);
@@ -310,6 +411,32 @@ exports.getInvoiceStats = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: stats
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Get all invoices for the currently logged-in client
+ * @route   GET /api/client/invoices
+ * @access  Private (Client role)
+ */
+exports.getClientInvoices = async (req, res, next) => {
+  try {
+    // The user ID from protect middleware is the client's auth ID
+    const clientAuthId = req.user.id;
+    
+    // Optional query parameters (e.g., ?status=paid)
+    const query = {};
+    if (req.query.status) query.status = req.query.status;
+
+    const invoices = await Invoice.findByClientAuthId(clientAuthId, query);
+
+    res.status(200).json({
+      success: true,
+      count: invoices.length,
+      data: invoices
     });
   } catch (error) {
     next(error);

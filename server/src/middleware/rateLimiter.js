@@ -80,11 +80,16 @@ const authLimiter = rateLimiter({
 });
 
 // Strict limiter for payment-related routes
-const paymentLimiter = rateLimiter({
+const paymentLimiterInstance = rateLimiter({
   windowMs: 60 * 60 * 1000, // 1 hour
   maxRequests: 20, // 20 payment requests per hour
   message: 'Too many payment requests from this IP, please try again later'
 });
+
+const paymentLimiter = (req, res, next) => {
+    console.log(`>>> ENTERING paymentLimiter middleware for: ${req.method} ${req.originalUrl}`);
+    paymentLimiterInstance(req, res, next);
+};
 
 module.exports = {
   rateLimiter,

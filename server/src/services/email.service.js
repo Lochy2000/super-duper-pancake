@@ -21,7 +21,7 @@ const safelySendEmail = async (mailOptions) => {
   try {
     const { from, to, subject, html, text } = mailOptions;
     await resend.emails.send({
-      from: from || process.env.EMAIL_FROM,
+      from: from || process.env.EMAIL_FROM || 'Invoice System <noreply@easywebs.uk>',
       to,
       subject,
       html,
@@ -36,18 +36,16 @@ const safelySendEmail = async (mailOptions) => {
 };
 
 /**
- * Send email with invoice details when a new invoice is created
+ * Send email with invoice details and client login info when a new invoice is created
  * @param {Object} invoice The invoice object
- * @param {String} toEmail Override the client email if needed
+ * @param {string | null} temporaryPassword The generated temporary password (null if client existed)
+ * @param {boolean} clientExists Indicates if the client account already existed
  */
-const sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
+const sendInvoiceCreatedEmail = async (invoice, temporaryPassword, clientExists) => {
   try {
+    const dueDate = new Date(invoice.due_date).toLocaleDateString();
     
-    // Format due date
-    const dueDate = new Date(invoice.dueDate).toLocaleDateString();
-    
-    // Format invoice items
-    const itemsList = invoice.items.map(item => {
+    const itemsList = (invoice.items || []).map(item => {
       return `
         <tr>
           <td style="padding: 8px; border-bottom: 1px solid #ddd;">${item.description}</td>
@@ -58,26 +56,73 @@ const sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
       `;
     }).join('');
     
-    // Create invoice payment link
-    const paymentUrl = `${config.frontendUrl}/invoices/${invoice.invoiceNumber}`;
+    // Define URLs using environment variables
+    const baseUrl = process.env.FRONTEND_URL || config.frontendUrl;
+    const clientLoginUrl = `${baseUrl}/client/login`;
+    const invoiceUrl = `${baseUrl}/pay/${invoice.invoice_number}/${invoice.access_token}`;
+    
+    // --- Login Information Section ---
+    let loginSectionHtml = '';
+    let loginSectionText = '';
+
+    if (temporaryPassword) {
+      // New client account was created
+      loginSectionHtml = `
+        <div style="margin: 20px 0; padding: 15px; background-color: #e9ecef; border-left: 4px solid #007bff; color: #495057;">
+          <h3 style="margin-top: 0; color: #0056b3;">Access Your Client Portal</h3>
+          <p>A client portal account has been created for you. You can log in to view and manage your invoices, including changing your password.</p>
+          <p>
+            <strong>Login Page:</strong> <a href="${clientLoginUrl}">${clientLoginUrl}</a><br>
+            <strong>Email:</strong> ${invoice.client_email}<br>
+            <strong>Temporary Password:</strong> ${temporaryPassword}
+          </p>
+        </div>
+      `;
+      loginSectionText = `
+Access Your Client Portal:
+A client portal account has been created for you. You can log in to view and manage your invoices, including changing your password.
+Login Page: ${clientLoginUrl}
+Email: ${invoice.client_email}
+Temporary Password: ${temporaryPassword}
+      `;
+    } else if (clientExists) {
+      // Client already existed
+      loginSectionHtml = `
+        <div style="margin: 20px 0; padding: 15px; background-color: #e9ecef; border-left: 4px solid #17a2b8; color: #495057;">
+          <h3 style="margin-top: 0; color: #0f5b68;">Access Your Client Portal</h3>
+          <p>You can also log into your client portal to view and manage this invoice:</p>
+          <p><a href="${clientLoginUrl}">${clientLoginUrl}</a></p>
+        </div>
+      `;
+       loginSectionText = `
+Access Your Client Portal:
+You can also log into your client portal to view and manage this invoice:
+${clientLoginUrl}
+      `;
+    }
     
     // Email content
     const mailOptions = {
-      to: toEmail || invoice.clientEmail,
-      subject: `Invoice #${invoice.invoiceNumber} from Your Company Name`,
+      to: invoice.client_email,
+      subject: `Invoice #${invoice.invoice_number} from Your Company Name`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background-color: #f8f9fa; padding: 20px; text-align: center;">
-            <h1 style="color: #333;">Invoice #${invoice.invoiceNumber}</h1>
+            <h1 style="color: #333;">Invoice #${invoice.invoice_number}</h1>
           </div>
           
           <div style="padding: 20px;">
-            <p>Dear ${invoice.clientName},</p>
+            <p>Dear ${invoice.client_name || 'Client'},</p> 
             
-            <p>We hope this email finds you well. Please find attached your invoice with the details below:</p>
+            <p>Thank you for your business. Please find your invoice details below:</p>
             
+            <!-- Invoice Link Section -->
+            <div style="margin: 20px 0; text-align: center;">
+              <a href="${invoiceUrl}" style="background-color: #28a745; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; font-size: 16px;">View Invoice</a>
+            </div>
+
             <div style="margin: 20px 0; background-color: #f8f9fa; padding: 15px; border-radius: 5px;">
-              <p><strong>Invoice Number:</strong> ${invoice.invoiceNumber}</p>
+              <p><strong>Invoice Number:</strong> ${invoice.invoice_number}</p>
               <p><strong>Due Date:</strong> ${dueDate}</p>
               <p><strong>Total Amount:</strong> $${invoice.total.toFixed(2)}</p>
             </div>
@@ -110,55 +155,51 @@ const sendInvoiceCreatedEmail = async (invoice, toEmail = null) => {
               </tfoot>
             </table>
             
-            <div style="margin: 20px 0; text-align: center;">
-              <a href="${paymentUrl}" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">View and Pay Invoice</a>
-            </div>
+            <!-- Login Info Section -->
+            ${loginSectionHtml}
+            <!-- End Login Info Section -->
             
-            <p>If you have any questions or concerns regarding this invoice, please don't hesitate to contact us.</p>
-            
-            <p>Thank you for your business!</p>
-            
+            <p>If you have any questions, please contact us.</p>
             <p>Best regards,<br>Your Company Name</p>
           </div>
-          
           <div style="background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;">
             <p>&copy; ${new Date().getFullYear()} Your Company Name. All rights reserved.</p>
           </div>
         </div>
       `,
       text: `
-Invoice #${invoice.invoiceNumber}
+Invoice #${invoice.invoice_number}
 
-Dear ${invoice.clientName},
+Dear ${invoice.client_name || 'Client'},
 
-We hope this email finds you well. Please find attached your invoice with the details below:
+Thank you for your business. Please find your invoice details below.
 
-Invoice Number: ${invoice.invoiceNumber}
+View your invoice here:
+${invoiceUrl}
+
+Invoice Number: ${invoice.invoice_number}
 Due Date: ${dueDate}
 Total Amount: $${invoice.total.toFixed(2)}
 
-Description | Quantity | Price | Amount
-${itemsList.replace(/<tr>/g, '').replace(/<\/tr>/g, '').replace(/<td>/g, '').replace(/<\/td>/g, '')}
-
+--- Items ---
+${(invoice.items || []).map(i => `${i.description} | Qty: ${i.quantity} | Price: $${i.price.toFixed(2)} | Amount: $${(i.quantity * i.price).toFixed(2)}`).join('\n')}
+-------------
 Subtotal: $${invoice.subtotal.toFixed(2)}
 Tax: $${invoice.tax.toFixed(2)}
 Total: $${invoice.total.toFixed(2)}
 
-You can view and pay your invoice at: ${paymentUrl}
+${loginSectionText}
 
-If you have any questions or concerns regarding this invoice, please don't hesitate to contact us.
-
-Thank you for your business!
+If you have any questions, please contact us.
 
 Best regards,
 Your Company Name
       `
     };
     
-    // Send email using the helper function
     return await safelySendEmail(mailOptions);
   } catch (error) {
-    console.error('Error preparing invoice email:', error);
+    console.error('Error preparing invoice created email:', error);
     return false;
   }
 };
@@ -169,13 +210,12 @@ Your Company Name
  */
 const sendPaymentConfirmationEmail = async (invoice) => {
   try {
-    
     // Create invoice view link
-    const invoiceUrl = `${config.frontendUrl}/invoices/${invoice.invoiceNumber}`;
+    const baseUrl = process.env.FRONTEND_URL || config.frontendUrl;
+    const invoiceUrl = `${baseUrl}/invoices/${invoice.invoiceNumber}`;
     
     // Format payment method
-    const paymentMethod = invoice.paymentMethod === 'stripe' ? 'Credit Card' : 
-                         invoice.paymentMethod === 'paypal' ? 'PayPal' : 'Other';
+    const paymentMethod = invoice.paymentMethod === 'stripe' ? 'Credit Card' : 'Other';
     
     // Email content
     const mailOptions = {
@@ -204,43 +244,38 @@ const sendPaymentConfirmationEmail = async (invoice) => {
               <a href="${invoiceUrl}" style="background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">View Invoice</a>
             </div>
             
-            <p>If you have any questions or concerns regarding this payment, please don't hesitate to contact us.</p>
-            
-            <p>Thank you for your business!</p>
-            
+            <p>If you have any questions, please contact us.</p>
             <p>Best regards,<br>Your Company Name</p>
           </div>
-          
           <div style="background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #6c757d;">
             <p>&copy; ${new Date().getFullYear()} Your Company Name. All rights reserved.</p>
           </div>
         </div>
       `,
       text: `
-Payment Confirmation
+Payment Confirmation for Invoice #${invoice.invoiceNumber}
 
 Dear ${invoice.clientName},
 
 Thank you for your payment. This email confirms that we have received your payment for invoice #${invoice.invoiceNumber}.
 
-Invoice Number: ${invoice.invoiceNumber}
-Payment Date: ${new Date().toLocaleDateString()}
-Payment Method: ${paymentMethod}
-Amount: $${invoice.total.toFixed(2)}
-Transaction ID: ${invoice.transactionId || 'N/A'}
+Payment Details:
+- Invoice Number: ${invoice.invoiceNumber}
+- Payment Date: ${new Date().toLocaleDateString()}
+- Payment Method: ${paymentMethod}
+- Amount: $${invoice.total.toFixed(2)}
+- Transaction ID: ${invoice.transactionId || 'N/A'}
 
-You can view your invoice at: ${invoiceUrl}
+You can view your invoice here:
+${invoiceUrl}
 
-If you have any questions or concerns regarding this payment, please don't hesitate to contact us.
-
-Thank you for your business!
+If you have any questions, please contact us.
 
 Best regards,
 Your Company Name
       `
     };
     
-    // Send email
     return await safelySendEmail(mailOptions);
   } catch (error) {
     console.error('Error preparing payment confirmation email:', error);

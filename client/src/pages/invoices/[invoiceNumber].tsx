@@ -1,28 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { isValid, parseISO } from 'date-fns';
 import { NextPage } from 'next';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { format } from 'date-fns';
 import { toast } from 'react-toastify';
+import { format, parseISO, isValid } from 'date-fns';
+import { Invoice, InvoiceItem } from '../../services/invoiceService';
 import Layout from '../../components/layout/Layout';
 import { getInvoiceByNumber } from '../../services/invoiceService';
-import { Invoice } from '../../services/invoiceService';
 import { getPaymentMethods } from '../../services/paymentService';
 import StripePayment from '../../components/payment/StripePayment';
 import PayPalPayment from '../../components/payment/PayPalPayment';
+import { formatSafeDate } from '../../utils/dateUtils';
 
 const InvoiceDetail: NextPage = () => {
-  // Helper function to safely format dates
-  const formatSafeDate = (dateString: string | undefined | null) => {
-    if (!dateString) return 'N/A';
-    try {
-      const date = parseISO(dateString);
-      return isValid(date) ? format(date, 'MMM dd, yyyy') : 'N/A';
-    } catch {
-      return 'N/A';
-    }
-  };
   const router = useRouter();
   const { invoiceNumber } = router.query;
   
@@ -31,6 +21,14 @@ const InvoiceDetail: NextPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('');
   const [availablePaymentMethods, setAvailablePaymentMethods] = useState<{id: string, name: string}[]>([]);
+
+  // Placeholder function for successful payment
+  const handlePaymentSuccess = () => {
+    toast.success('Payment Successful!');
+    // Refetch or update invoice status locally
+    setInvoice(prev => prev ? { ...prev, status: 'paid' } : null);
+    // Optionally, navigate or show a confirmation
+  };
 
   // Helper to validate invoice data
   const validateInvoice = (invoice: Invoice): Invoice => {
@@ -73,12 +71,16 @@ const InvoiceDetail: NextPage = () => {
         // Validate the invoice data before setting it
         setInvoice(validateInvoice(response.data));
         
-        // Load available payment methods
+        // Load available payment methods and filter out PayPal
         const methodsResponse = await getPaymentMethods();
-        setAvailablePaymentMethods(methodsResponse.data);
-        
-        if (methodsResponse.data.length > 0) {
-          setSelectedPaymentMethod(methodsResponse.data[0].id);
+        const filteredMethods = methodsResponse.data.filter(method => method.name !== 'paypal');
+        setAvailablePaymentMethods(filteredMethods);
+
+        if (filteredMethods.length > 0) {
+          setSelectedPaymentMethod(filteredMethods[0].id);
+        } else {
+          setSelectedPaymentMethod(''); // No valid method available
+          // Maybe show a message if needed
         }
       } catch (err) {
         console.error('Error fetching invoice:', err);
@@ -247,12 +249,11 @@ const InvoiceDetail: NextPage = () => {
           </div>
         </div>
         
-        {/* Payment Section - Only show if invoice is not paid */}
-        {invoice?.status !== 'paid' && (
-          <div className="card max-w-4xl mx-auto print:hidden">
-            <h2 className="text-xl font-bold text-gray-900 mb-6">Payment Options</h2>
-            
-            {/* Payment Method Selection */}
+        {/* Payment Processing Section - Conditionally rendered if invoice is unpaid */}
+        {invoice.status !== 'paid' && (
+          <div className="mt-8 p-6 bg-gray-50 rounded-lg print:hidden">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">Pay Invoice</h2>
+            {/* Payment Method Selection - Filtered */}
             <div className="mb-6">
               <label htmlFor="paymentMethod" className="block text-sm font-medium text-gray-700 mb-2">
                 Select Payment Method
@@ -262,23 +263,36 @@ const InvoiceDetail: NextPage = () => {
                 className="form-input"
                 value={selectedPaymentMethod}
                 onChange={(e) => setSelectedPaymentMethod(e.target.value)}
+                disabled={availablePaymentMethods.length === 0}
               >
-                {availablePaymentMethods.map((method) => (
-                  <option key={method.id} value={method.id}>
-                    {method.name === 'stripe' ? 'Credit Card (Stripe)' : 'PayPal'}
-                  </option>
-                ))}
+                {availablePaymentMethods.length > 0 ? (
+                  availablePaymentMethods.map((method) => (
+                    <option key={method.id} value={method.id}>
+                      {method.name === 'stripe' ? 'Credit Card (Stripe)' : 'Other Method'}
+                    </option>
+                  ))
+                ) : (
+                   <option disabled value="">No payment methods available</option>
+                )}
               </select>
             </div>
             
-            {/* Payment Component */}
-            <div className="mb-6">
-              {selectedPaymentMethod === 'stripe' ? (
-                <StripePayment invoiceId={invoice._id || ''} amount={invoice?.total || 0} />
-              ) : (
-                <PayPalPayment invoiceId={invoice._id || ''} amount={invoice?.total || 0} />
-              )}
-            </div>
+            {/* Payment Component - Only Stripe, if invoice ID exists */}
+            {invoice._id && (
+              <div className="mb-6">
+                {selectedPaymentMethod === 'stripe' ? (
+                  <StripePayment 
+                    invoiceId={invoice._id} 
+                    amount={invoice.total}
+                    onPaymentSuccess={handlePaymentSuccess}
+                  />
+                ) : availablePaymentMethods.length === 0 ? (
+                  <div className="text-center p-4 bg-gray-100 rounded">No payment methods configured.</div>
+                ) : (
+                  <div className="text-center p-4 bg-gray-100 rounded">Select a payment method.</div>
+                )}
+              </div>
+            )}
           </div>
         )}
         

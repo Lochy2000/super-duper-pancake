@@ -14,7 +14,7 @@ const {
 const { protect, authorize } = require('../middleware/auth');
 
 // Public routes
-router.get('/public/:invoiceNumber', getInvoiceByNumber);
+router.get('/public/:invoiceNumber/:accessToken', getInvoiceByNumber);
 
 // Protected routes - require login
 router.use(protect);

@@ -42,38 +42,41 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  // Only allow GET requests
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // Get invoice number from query parameters
-    const invoiceNumber = req.query.number as string;
-    if (!invoiceNumber) {
-      return res.status(400).json({ error: 'Invoice number is required' });
+    const { invoiceNumber, accessToken } = req.query;
+
+    if (!invoiceNumber || !accessToken) {
+      return res.status(400).json({ error: 'Invoice number and access token are required' });
     }
 
-    // Find the invoice by invoice number
-    const { data: invoice, error } = await supabase
+    // Get invoice with client information
+    const { data: invoice, error: invoiceError } = await supabase
       .from('invoices')
       .select('*, clients(*)')
       .eq('invoice_number', invoiceNumber)
+      .eq('access_token', accessToken)
       .single();
 
-    if (error) {
-      if (error.code === 'PGRST116') { // Record not found
-        return res.status(404).json({ error: 'Invoice not found' });
-      }
-      console.error('Error fetching invoice:', error);
-      return res.status(500).json({ error: 'Failed to fetch invoice' });
+    if (invoiceError || !invoice) {
+      console.error('Error fetching invoice:', invoiceError);
+      return res.status(404).json({ error: 'Invoice not found or access denied' });
+    }
+
+    // Check if access token has expired
+    const tokenExpiresAt = new Date(invoice.token_expires_at);
+    const now = new Date();
+    if (tokenExpiresAt < now) {
+      return res.status(401).json({ error: 'Access token has expired' });
     }
 
     // Transform and return the invoice data
     const transformedData = transformInvoiceData(invoice);
-    
-    // Include payment status if needed
     return res.status(200).json(transformedData);
+
   } catch (error: any) {
     console.error('API route error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });

@@ -67,6 +67,8 @@ create table if not exists public.invoices (
     total decimal(10,2) not null default 0,
     notes text,
     terms text,
+    access_token text,
+    token_expires_at timestamp with time zone,
     created_at timestamp with time zone default timezone('utc'::text, now()),
     updated_at timestamp with time zone default timezone('utc'::text, now())
 );

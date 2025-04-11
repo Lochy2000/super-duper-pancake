@@ -17,16 +17,17 @@ const app = express();
 // Validate environment variables
 validateEnvVariables();
 
-// CORS configuration
+// Restore original CORS configuration
 const corsOptions = {
-  origin: true, // Allow all origins temporarily for development
+  origin: true, // Or your specific allowed origins
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'stripe-signature']
 };
 
 // Middleware
-app.use(cors(corsOptions));
+app.use(cors(corsOptions)); // Use original options
+// app.use(cors()); // Remove default CORS
 app.use(helmet({
   crossOriginResourcePolicy: false,
   crossOriginEmbedderPolicy: false
@@ -35,15 +36,27 @@ app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// --- Remove TEMPORARY PAYPAL ROUTE TEST ---
+/*
+const paymentController = require('./controllers/payment.controller');
+app.post('/api/payments/paypal/create-order', (req, res, next) => {
+  console.log('>>> HIT DIRECT /api/payments/paypal/create-order route in server.js');
+  // Call the actual controller function
+  paymentController.createPayPalOrder(req, res, next);
+});
+*/
+// --- END TEMPORARY PAYPAL ROUTE TEST ---
+
 // Routes
 const rawBodyMiddleware = require('./middleware/webhooks/rawBodyMiddleware');
 const { apiLimiter, authLimiter, paymentLimiter } = require('./middleware/rateLimiter');
-const paymentController = require('./controllers/payment.controller');
+const paymentController = require('./controllers/payment.controller'); // Ensure this require is present if removed by previous edit
 const webhookRouter = express.Router();
 webhookRouter.post('/stripe/webhook', express.raw({ type: 'application/json' }), rawBodyMiddleware, paymentController.stripeWebhook);
 
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/invoices', apiLimiter, invoiceRoutes);
+// Restore paymentLimiter
 app.use('/api/payments', paymentLimiter, paymentRoutes);
 app.use('/api/payments', webhookRouter);
 

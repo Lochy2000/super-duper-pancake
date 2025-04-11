@@ -19,46 +19,36 @@ const Header: React.FC = () => {
   };
 
   return (
-    <header className="bg-white shadow-sm">
+    <header className="bg-[#0a0a0f] border-b border-purple-900/10">
       <div className="container mx-auto px-4">
         <div className="flex justify-between items-center py-4">
-          <Link href="/" className="font-bold text-xl text-primary-600">
-            Invoice System
+          <Link href="/" className="flex items-center space-x-2">
+            <div className="m2" style={{ width: '40px', height: '40px' }}>
+              <span className="logo" style={{ fontSize: '14px' }}>EW</span>
+            </div>
+            <span className="font-bold text-xl text-purple-500">easy web</span>
           </Link>
           
           <nav>
             <ul className="flex space-x-6">
               <li>
-                <Link href="/" className="text-gray-600 hover:text-primary-600">
+                <Link href="/" className="text-gray-300 hover:text-purple-400 transition-colors">
                   Home
                 </Link>
               </li>
-              {isLoggedIn ? (
-                <>
-                  <li>
-                    <Link href="/admin/dashboard" className="text-gray-600 hover:text-primary-600">
-                      Dashboard
-                    </Link>
-                  </li>
-                  <li>
-                    <Link href="/admin/profile" className="text-gray-600 hover:text-primary-600">
-                      Profile
-                    </Link>
-                  </li>
-                  <li>
-                    <button 
-                      onClick={handleLogout}
-                      className="text-gray-600 hover:text-primary-600"
-                    >
-                      Logout
-                    </button>
-                  </li>
-                </>
-              ) : (
+              <li>
+                <Link href="/invoices/view" className="text-gray-300 hover:text-purple-400 transition-colors">
+                  View Invoice
+                </Link>
+              </li>
+              {isLoggedIn && (
                 <li>
-                  <Link href="/admin/login" className="text-gray-600 hover:text-primary-600">
-                    Admin Login
-                  </Link>
+                  <button 
+                    onClick={handleLogout}
+                    className="text-gray-300 hover:text-purple-400 transition-colors"
+                  >
+                    Logout
+                  </button>
                 </li>
               )}
             </ul>
