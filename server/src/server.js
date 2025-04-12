@@ -19,15 +19,16 @@ validateEnvVariables();
 
 // Restore original CORS configuration
 const corsOptions = {
-  origin: true, // Or your specific allowed origins
+  origin: config.nodeEnv === 'production' 
+    ? config.frontendUrl // Your Vercel deployment URL
+    : 'http://localhost:3000',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'stripe-signature']
 };
 
 // Middleware
-app.use(cors(corsOptions)); // Use original options
-// app.use(cors()); // Remove default CORS
+app.use(cors(corsOptions));
 app.use(helmet({
   crossOriginResourcePolicy: false,
   crossOriginEmbedderPolicy: false
