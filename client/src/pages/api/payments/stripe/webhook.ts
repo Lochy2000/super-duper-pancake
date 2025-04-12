@@ -36,7 +36,7 @@ const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia', // Use the specific version required by the installed Stripe library
+  apiVersion: '2025-03-31.basil',
 });
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;

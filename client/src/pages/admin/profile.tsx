@@ -80,7 +80,7 @@ const ProfilePage: NextPage = () => {
       }
       
       // Update password
-      await authService.changePassword(newPassword);
+      await authService.changePassword(formData.newPassword);
       
       // Reset password fields
       setFormData(prev => ({
