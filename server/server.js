@@ -14,6 +14,14 @@ app.use(cors({
 
 app.use(express.json());
 
+// Test endpoint
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    message: 'Backend connection successful!',
+    timestamp: new Date().toISOString()
+  });
+});
+
 const authRoutes = require('./src/routes/auth.routes');
 const invoiceRoutes = require('./src/routes/invoice.routes');
 const paymentRoutes = require('./src/routes/payment.routes');

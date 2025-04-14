@@ -1,10 +1,11 @@
 import type { NextPage } from 'next';
 import Head from 'next/head';
 import Link from 'next/link';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const Home: NextPage = () => {
   const cursorRef = useRef<HTMLDivElement>(null);
+  const [testResult, setTestResult] = useState('');
 
   useEffect(() => {
     const cursor = cursorRef.current;
@@ -28,6 +29,16 @@ const Home: NextPage = () => {
       document.removeEventListener('mouseleave', handleMouseLeave);
     };
   }, []);
+
+  const testBackendConnection = async () => {
+    try {
+      const response = await fetch('https://super-duppa-pancake-c1e42c673a83.herokuapp.com/api/test');
+      const data = await response.json();
+      setTestResult(JSON.stringify(data, null, 2));
+    } catch (error: any) {
+      setTestResult('Error connecting to backend: ' + (error.message || 'Unknown error'));
+    }
+  };
 
   return (
     <div className="min-h-screen grid-background text-white">
@@ -83,6 +94,21 @@ const Home: NextPage = () => {
               </div>
             </div>
           </div>
+        </div>
+
+        <div className="mt-8 p-4 bg-gray-100 rounded-lg">
+          <h2 className="text-xl font-bold mb-4">Test Backend Connection</h2>
+          <button 
+            onClick={testBackendConnection}
+            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+          >
+            Test Connection
+          </button>
+          {testResult && (
+            <pre className="mt-4 p-4 bg-white rounded">
+              {testResult}
+            </pre>
+          )}
         </div>
       </main>
     </div>
