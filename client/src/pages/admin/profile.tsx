@@ -7,6 +7,9 @@ import Layout from '../../components/layout/Layout';
 import { useAuth } from '../../hooks/useAuth';
 import * as authService from '../../services/authService';
 
+// Prevent Supabase initialization during build
+const isBrowser = typeof window !== 'undefined';
+
 const ProfilePage: NextPage = () => {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();

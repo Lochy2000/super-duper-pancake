@@ -3,6 +3,9 @@ import { useRouter } from 'next/router';
 import { toast } from 'react-toastify';
 import * as authService from '../services/authService';
 
+// Prevent execution during SSR
+const isBrowser = typeof window !== 'undefined';
+
 export function useAuth() {
   const [user, setUser] = useState<authService.User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -10,6 +13,8 @@ export function useAuth() {
 
   // Function to fetch user data
   const fetchUser = async () => {
+    if (!isBrowser) return;
+    
     try {
       const userData = await authService.getCurrentUser();
       setUser(userData);
@@ -23,7 +28,9 @@ export function useAuth() {
 
   // Check auth status on mount
   useEffect(() => {
-    fetchUser();
+    if (isBrowser) {
+      fetchUser();
+    }
   }, []);
 
   // Login function
