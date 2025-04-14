@@ -1,3 +1,19 @@
+const express = require('express');
+const cors = require('cors');
+const app = express();
+
+// CORS configuration
+app.use(cors({
+  origin: [
+    'https://super-duper-pancake-client.vercel.app',  // Vercel production URL
+    'https://*.vercel.app',                           // All Vercel preview deployments
+    'http://localhost:3000'                           // Local development
+  ],
+  credentials: true
+}));
+
+app.use(express.json());
+
 const authRoutes = require('./src/routes/auth.routes');
 const invoiceRoutes = require('./src/routes/invoice.routes');
 const paymentRoutes = require('./src/routes/payment.routes');
@@ -10,4 +26,10 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/client', clientRoutes);
 
-// Error handler middleware 
+// Error handler middleware
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+}); 
