@@ -22,12 +22,31 @@ export const login = async (email: string, password: string) => {
     tokenService.setToken(data.session.access_token);
   }
 
-  // Get user profile
-  const { data: profile } = await supabase
+  // Get or create user profile
+  let profile;
+  const { data: existingProfile } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', data.user.id)
     .single();
+
+  if (!existingProfile) {
+    // Create profile if it doesn't exist
+    const { data: newProfile } = await supabase
+      .from('profiles')
+      .insert([
+        { 
+          id: data.user.id,
+          email: data.user.email,
+          role: 'admin' // Set as admin for first user
+        }
+      ])
+      .select()
+      .single();
+    profile = newProfile;
+  } else {
+    profile = existingProfile;
+  }
 
   return {
     user: {
